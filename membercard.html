@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>회원 카드</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"Malgun Gothic","맑은 고딕","Apple SD Gothic Neo",sans-serif; background:#f3f4f6; color:#222; font-size:14px; }
+
+  /* ── 컨트롤 영역 ── */
+  .controls { max-width:900px; margin:16px auto; padding:16px; background:#fff; border-radius:10px; border:1px solid #e5e7eb; }
+  .controls h2 { font-size:18px; margin-bottom:12px; }
+  .ctrl-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .ctrl-row input[type=text] { flex:1; min-width:160px; padding:8px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px; }
+  .ctrl-row select { padding:8px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px; min-width:140px; }
+  .btn { padding:8px 16px; border:none; border-radius:6px; font-size:14px; cursor:pointer; font-weight:600; }
+  .btn-primary { background:#2563eb; color:#fff; }
+  .btn-primary:hover { background:#1d4ed8; }
+  .btn-green { background:#16a34a; color:#fff; }
+  .btn-green:hover { background:#15803d; }
+  .btn-orange { background:#ea580c; color:#fff; }
+  .btn-orange:hover { background:#c2410c; }
+  .btn-gray { background:#6b7280; color:#fff; }
+  .btn-gray:hover { background:#4b5563; }
+  .btn:disabled { opacity:0.5; cursor:not-allowed; }
+  .status-msg { margin-top:8px; font-size:13px; color:#6b7280; min-height:20px; }
+  .rank-box { display:flex; gap:6px; flex-wrap:wrap; align-items:center; padding:6px 10px; border:1px solid #d1d5db; border-radius:6px; background:#f9fafb; }
+  .rank-box label { display:inline-flex; align-items:center; gap:4px; font-size:13px; cursor:pointer; padding:4px 8px; border-radius:4px; background:#fff; border:1px solid #e5e7eb; }
+  .rank-box label:hover { background:#eef2ff; }
+  .rank-box label input { cursor:pointer; }
+  .rank-box .rank-title { font-size:13px; color:#374151; font-weight:600; margin-right:4px; }
+
+  /* ── 카드 영역 ── */
+  .cards-area { max-width:900px; margin:0 auto 40px; padding:0 16px; }
+
+  .card-wrapper { margin-bottom:16px; }
+  .exclude-bar { display:flex; justify-content:flex-end; align-items:center; padding:4px 8px; background:#f9fafb; border:1px solid #e5e7eb; border-bottom:none; border-radius:6px 6px 0 0; }
+  .exclude-bar label { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#6b7280; cursor:pointer; user-select:none; }
+  .exclude-bar input { cursor:pointer; }
+  .card-wrapper.excluded .member-card { opacity:0.4; }
+  .card-wrapper.excluded .exclude-bar { background:#fee2e2; border-color:#fca5a5; }
+  .card-wrapper.excluded .exclude-bar label { color:#dc2626; font-weight:600; }
+
+  .member-card { table-layout:fixed; border-collapse:collapse; width:100%; margin-bottom:0; background:#fff; }
+  .member-card td { border:1px solid #999; padding:5px 8px; vertical-align:middle; text-align:center; font-size:12px; height:32px; overflow:hidden; word-break:break-all; }
+  .photo-cell { padding:0 !important; background-size:100% 100%; background-position:center; background-repeat:no-repeat; background-color:#fafafa; }
+  .photo-placeholder { height:128px; display:flex; align-items:center; justify-content:center; color:#9ca3af; font-size:11px; }
+  .label-cell { background:#f0f0f0; font-weight:bold; text-align:center; font-size:11px; color:#444; }
+  .value-cell { font-size:12px; }
+  .name-value { font-weight:bold; font-size:14px; }
+  .name-check { display:none; }
+  .cards-area.with-name-check .name-check {
+    display:inline-block; width:14px; height:14px; border:1.5px solid #000;
+    margin-left:8px; vertical-align:middle; background:#fff;
+  }
+  .wide-cell { text-align:center; font-size:11px; line-height:1.5; word-break:keep-all; }
+  .wide-label { font-weight:normal; font-size:8px; color:#aaa; display:block; margin-bottom:0; }
+
+  /* ── 인쇄 전용 ── */
+  @media print {
+    body { background:#fff; }
+    .controls { display:none !important; }
+    .exclude-bar { display:none !important; }
+    .card-wrapper.excluded { display:none !important; }
+    .card-wrapper { margin-bottom:0; }
+    .cards-area { max-width:100%; padding:0; margin:0; }
+    .member-card { page-break-inside:avoid; margin-bottom:4mm; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 컨트롤 영역 -->
+<div class="controls" id="controls">
+  <h2>회원 카드 인쇄 / PDF</h2>
+  <div class="ctrl-row">
+    <input type="text" id="nameInput" placeholder="이름 검색" />
+    <button class="btn btn-primary" onclick="searchByName()">이름 검색</button>
+    <select id="deptSelect"><option value="">── 부서 선택 ──</option></select>
+    <button class="btn btn-primary" onclick="searchByDept()">부서 조회</button>
+  </div>
+  <div class="ctrl-row">
+    <div class="rank-box" id="rankBox">
+      <span class="rank-title">법계:</span>
+      <span style="font-size:12px;color:#9ca3af">로딩 중...</span>
+    </div>
+    <button class="btn btn-primary" onclick="searchByRanks()">법계 조회</button>
+  </div>
+  <div class="ctrl-row">
+    <div class="rank-box" id="statusBox">
+      <span class="rank-title">회원상태:</span>
+      <span style="font-size:12px;color:#9ca3af">로딩 중...</span>
+    </div>
+    <button class="btn btn-primary" onclick="searchByStatuses()">상태 조회</button>
+  </div>
+  <div class="ctrl-row">
+    <div class="rank-box" id="sortBox">
+      <span class="rank-title">정렬:</span>
+      <label><input type="radio" name="sortBy" value="member_id" checked onchange="onSortChange()"> 회원번호순</label>
+      <label><input type="radio" name="sortBy" value="name" onchange="onSortChange()"> 가나다순</label>
+    </div>
+    <div class="rank-box">
+      <span class="rank-title">옵션:</span>
+      <label><input type="checkbox" id="nameCheckToggle" onchange="onNameCheckToggle()"> 이름 옆 체크박스 (보고용)</label>
+    </div>
+  </div>
+  <div class="ctrl-row">
+    <button class="btn btn-orange" onclick="loadAll()">전체 조회</button>
+    <button class="btn btn-gray" onclick="window.print()">인쇄 (Ctrl+P)</button>
+    <button class="btn btn-green" id="pdfBtn" onclick="downloadPdf()">PDF 다운로드</button>
+  </div>
+  <div class="status-msg" id="statusMsg"></div>
+</div>
+
+<!-- 카드 렌더링 영역 -->
+<div class="cards-area" id="cardsArea"></div>
+
+<script>
+  var currentMode = '';
+  var currentKeyword = '';
+
+  // ── 초기화: 필터 옵션을 한 번에 로드 ──
+  google.script.run
+    .withSuccessHandler(function(options) {
+      options = options || {};
+      var departments = options.departments || [];
+      var ranks = options.ranks || [];
+      var statuses = options.statuses || [];
+
+      var sel = document.getElementById('deptSelect');
+      departments.forEach(function(d) {
+        var opt = document.createElement('option');
+        opt.value = d.id;
+        opt.textContent = d.name;
+        sel.appendChild(opt);
+      });
+
+      var box = document.getElementById('rankBox');
+      box.innerHTML = '<span class="rank-title">법계:</span>';
+      ranks.forEach(function(r) {
+        var label = document.createElement('label');
+        label.innerHTML = '<input type="checkbox" class="rank-chk" value="' + esc(r.name) + '">' +
+                          esc(r.name) + ' <span style="color:#9ca3af">(' + r.count + ')</span>';
+        box.appendChild(label);
+      });
+
+      var statusBox = document.getElementById('statusBox');
+      statusBox.innerHTML = '<span class="rank-title">회원상태:</span>';
+      statuses.forEach(function(s) {
+        var label = document.createElement('label');
+        label.innerHTML = '<input type="checkbox" class="status-chk" value="' + esc(s.name) + '">' +
+                          esc(s.name) + ' <span style="color:#9ca3af">(' + s.count + ')</span>';
+        statusBox.appendChild(label);
+      });
+    })
+    .withFailureHandler(function(e) {
+      document.getElementById('rankBox').innerHTML = '<span class="rank-title">법계:</span><span style="color:#dc2626;font-size:12px">로드 실패</span>';
+      document.getElementById('statusBox').innerHTML = '<span class="rank-title">회원상태:</span><span style="color:#dc2626;font-size:12px">로드 실패</span>';
+    })
+    .getMemberCardFilterOptions();
+
+  // ── 이름 검색 ──
+  function searchByName() {
+    var name = document.getElementById('nameInput').value.trim();
+    if (!name) { setStatus('이름을 입력해주세요.'); return; }
+    currentMode = 'name'; currentKeyword = name;
+    loadCards('name', name);
+  }
+
+  // ── 부서 조회 ──
+  function searchByDept() {
+    var deptId = document.getElementById('deptSelect').value;
+    if (!deptId) { setStatus('부서를 선택해주세요.'); return; }
+    currentMode = 'dept'; currentKeyword = deptId;
+    loadCards('dept', deptId);
+  }
+
+  // ── 법계 조회 (복수 선택) ──
+  function searchByRanks() {
+    var checks = document.querySelectorAll('.rank-chk:checked');
+    if (!checks.length) { setStatus('법계를 하나 이상 선택해주세요.'); return; }
+    var ranks = [];
+    for (var i = 0; i < checks.length; i++) ranks.push(checks[i].value);
+    var keyword = ranks.join(',');
+    currentMode = 'ranks'; currentKeyword = keyword;
+    loadCards('ranks', keyword);
+  }
+
+  // ── 회원상태 조회 (복수 선택) ──
+  function searchByStatuses() {
+    var checks = document.querySelectorAll('.status-chk:checked');
+    if (!checks.length) { setStatus('회원상태를 하나 이상 선택해주세요.'); return; }
+    var statuses = [];
+    for (var i = 0; i < checks.length; i++) statuses.push(checks[i].value);
+    var keyword = statuses.join(',');
+    currentMode = 'statuses'; currentKeyword = keyword;
+    loadCards('statuses', keyword);
+  }
+
+  // ── 전체 조회 ──
+  function loadAll() {
+    currentMode = 'all'; currentKeyword = '';
+    loadCards('all', '');
+  }
+
+  // ── 카드 데이터 로드 ──
+  function loadCards(mode, keyword) {
+    setStatus('데이터를 불러오는 중...');
+    document.getElementById('cardsArea').innerHTML = '';
+    google.script.run
+      .withSuccessHandler(function(members) {
+        renderCards(members);
+        setStatus(members.length + '명 조회 완료');
+      })
+      .withFailureHandler(function(e) {
+        setStatus('오류: ' + e.message);
+      })
+      .getMemberCardsData(mode, keyword, getSortBy());
+  }
+
+  // ── 정렬 옵션 읽기 ──
+  function getSortBy() {
+    var radios = document.getElementsByName('sortBy');
+    for (var i = 0; i < radios.length; i++) {
+      if (radios[i].checked) return radios[i].value;
+    }
+    return 'member_id';
+  }
+
+  // ── 정렬 변경 시 현재 조회를 다시 실행 ──
+  function onSortChange() {
+    if (!currentMode) return;
+    loadCards(currentMode, currentKeyword);
+  }
+
+  // ── 이름 옆 체크박스 표시 토글 (CSS만 변경, 재조회 불필요) ──
+  function isNameCheckOn() {
+    var el = document.getElementById('nameCheckToggle');
+    return !!(el && el.checked);
+  }
+  function onNameCheckToggle() {
+    document.getElementById('cardsArea').classList.toggle('with-name-check', isNameCheckOn());
+  }
+
+  // ── 카드 렌더링 ──
+  function renderCards(members) {
+    var area = document.getElementById('cardsArea');
+    area.innerHTML = '';
+    area.classList.toggle('with-name-check', isNameCheckOn());
+    if (!members.length) { area.innerHTML = '<p style="padding:20px;color:#999;">조회 결과가 없습니다.</p>'; return; }
+
+    members.forEach(function(m) {
+      area.appendChild(buildCard(m));
+    });
+  }
+
+  function buildCard(m) {
+    var thumbUrl = driveThumbUrl(m.photo);
+    var photoStyle = thumbUrl
+      ? 'background-image:url(' + thumbUrl + ');background-size:100% 100%'
+      : 'background-color:#e5e7eb';
+    var photoContent = thumbUrl ? '' : '<div class="photo-placeholder">사진 없음</div>';
+
+    var wrapper = document.createElement('div');
+    wrapper.className = 'card-wrapper';
+    var mid = m.member_id || '';
+    wrapper.innerHTML =
+      '<div class="exclude-bar">' +
+      '  <label><input type="checkbox" class="exclude-chk" value="' + esc(mid) + '" onchange="toggleExclude(this)"> PDF 제외</label>' +
+      '</div>';
+
+    var tbl = document.createElement('table');
+    tbl.className = 'member-card';
+    tbl.innerHTML =
+      '<colgroup>' +
+      '  <col style="width:105px">' +
+      '  <col style="width:56px">' +
+      '  <col style="width:84px">' +
+      '  <col style="width:56px">' +
+      '  <col style="width:84px">' +
+      '  <col style="width:56px">' +
+      '  <col style="width:100px">' +
+      '  <col style="width:180px">' +
+      '</colgroup>' +
+      '<tr>' +
+      '  <td class="photo-cell" rowspan="4" style="' + photoStyle + '">' + photoContent + '</td>' +
+      '  <td class="label-cell">이름</td><td class="value-cell name-value">' + esc(m.name) + '<span class="name-check"></span></td>' +
+      '  <td class="label-cell">법계</td><td class="value-cell">' + esc(m.rank) + '</td>' +
+      '  <td class="label-cell">생년월일</td><td class="value-cell">' + esc(m.birth) + '</td>' +
+      '  <td class="wide-cell" rowspan="2"><span class="wide-label">출생지</span>' + esc(m.birth_place) + '</td>' +
+      '</tr>' +
+      '<tr>' +
+      '  <td class="label-cell">법명</td><td class="value-cell">' + esc(m.dharma_name) + '</td>' +
+      '  <td class="label-cell">소개자</td><td class="value-cell">' + esc(m.referrer) + '</td>' +
+      '  <td class="label-cell">나이</td><td class="value-cell">' + esc(m.age) + '</td>' +
+      '</tr>' +
+      '<tr>' +
+      '  <td class="label-cell">소속</td><td class="value-cell">' + esc(m.dept_name) + '</td>' +
+      '  <td class="label-cell">직업</td><td class="value-cell">' + esc(m.job) + '</td>' +
+      '  <td class="label-cell">입회일</td><td class="value-cell">' + esc(m.join_date) + '</td>' +
+      '  <td class="wide-cell" rowspan="2"><span class="wide-label">주소</span>' + esc(m.address) + '</td>' +
+      '</tr>' +
+      '<tr>' +
+      '  <td class="label-cell">회원번호</td><td class="value-cell">' + esc(m.member_id) + '</td>' +
+      '  <td class="label-cell">직장</td><td class="value-cell">' + esc(m.company) + '</td>' +
+      '  <td class="label-cell">전화번호</td><td class="value-cell">' + esc(m.phone) + '</td>' +
+      '</tr>';
+    wrapper.appendChild(tbl);
+    return wrapper;
+  }
+
+  // ── PDF 제외 체크박스 토글 ──
+  function toggleExclude(chk) {
+    var wrapper = chk.closest('.card-wrapper');
+    if (wrapper) wrapper.classList.toggle('excluded', chk.checked);
+  }
+
+  function getExcludedIds() {
+    var checks = document.querySelectorAll('.exclude-chk:checked');
+    var ids = [];
+    for (var i = 0; i < checks.length; i++) {
+      if (checks[i].value) ids.push(checks[i].value);
+    }
+    return ids;
+  }
+
+  // ── PDF 다운로드 (배치 방식) ──
+  function downloadPdf() {
+    var mode = currentMode || 'all';
+    var keyword = currentKeyword || '';
+    var excludeIds = getExcludedIds();
+    var btn = document.getElementById('pdfBtn');
+    btn.disabled = true;
+    btn.textContent = 'PDF 생성 중...';
+    var excMsg = excludeIds.length ? ' (' + excludeIds.length + '명 제외)' : '';
+    setStatus('PDF 생성을 시작합니다...' + excMsg);
+    runBatch(mode, keyword, excludeIds, 0, '');
+  }
+
+  function runBatch(mode, keyword, excludeIds, batchIndex, jobId) {
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (result.done) {
+          // 모든 배치 완료
+          var btn = document.getElementById('pdfBtn');
+          btn.disabled = false;
+          btn.textContent = 'PDF 다운로드';
+          setStatus('PDF 생성 완료! 총 ' + result.total + '명, ' + result.batches + '개 파일');
+          window.open(result.folderUrl || '', '_blank');
+          return;
+        }
+
+        var pct = Math.round(result.processed / result.totalMembers * 100);
+        setStatus('PDF 생성 중... ' + result.processed + '/' + result.totalMembers + '명 (' + pct + '%)  배치 ' + (result.batchIndex + 1) + '/' + result.totalBatches);
+
+        // 다음 배치 실행
+        runBatch(mode, keyword, excludeIds, result.nextBatch, result.jobId || jobId || '');
+      })
+      .withFailureHandler(function(e) {
+        var btn = document.getElementById('pdfBtn');
+        btn.disabled = false;
+        btn.textContent = 'PDF 다운로드';
+        setStatus('PDF 오류 (배치 ' + batchIndex + '): ' + e.message);
+      })
+      .generateMemberCardsPdfBatch(mode, keyword, batchIndex, excludeIds, getSortBy(), isNameCheckOn(), jobId || '');
+  }
+
+  // ── 유틸 ──
+  function driveThumbUrl(url) {
+    if (!url) return '';
+    var m = String(url).match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || String(url).match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    return m ? 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w200' : '';
+  }
+  function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+  function setStatus(msg) { document.getElementById('statusMsg').textContent = msg || ''; }
+
+  // Enter 키 검색
+  document.getElementById('nameInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') searchByName();
+  });
+</script>
+</body>
+</html>

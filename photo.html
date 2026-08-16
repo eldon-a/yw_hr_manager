@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>회원 정보 수정</title>
+  <style>
+    :root { --primary: #2c3e50; --accent: #3498db; --bg: #f5f6fa; --ok:#27ae60; --warn:#f39c12; --err:#e74c3c; }
+    * { box-sizing: border-box; }
+    body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; margin:0; padding:0; background:var(--bg); color:#333; }
+    .container { max-width: 720px; margin: 0 auto; padding: 16px; }
+    .header { text-align:center; border-bottom:2px solid var(--primary); padding: 16px 0; margin-bottom:16px; }
+    .header h2 { margin:0; color:var(--primary); font-size: 22px; }
+    .header p { margin: 6px 0 0; font-size: 13px; color:#666; word-break: keep-all; overflow-wrap: anywhere; }
+    .header p.hint { font-size: 12px; color: #888; margin-top: 4px; }
+    .header .header-inline { display: inline-block; text-align: left; }
+    .header .header-inline p { text-align: left; }
+    .header p.hint-title { font-size: 13px; color: #333; font-weight: 700; margin-top: 8px; }
+    .header p.hint-item { margin-left: 4px; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:16px; margin-bottom:14px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    label { font-size: 13px; color:#444; }
+    input[type=text], input[type=email], select { padding: 12px; border:1px solid #d1d5db; border-radius:6px; font-size: 15px; width: 100%; }
+    input::placeholder { font-size: 14px; color: #c9c9c9; }
+    input::-webkit-input-placeholder { font-size: 14px; color: #c9c9c9; }
+    input::-moz-placeholder { font-size: 14px; color: #c9c9c9; opacity: 1; }
+    input:-ms-input-placeholder { font-size: 14px; color: #c9c9c9; }
+    .search-row input, .search-row select { flex: 1 1 200px; min-width: 0; }
+    button { background: var(--accent); color:#fff; border:none; padding: 12px 18px; border-radius:6px; cursor:pointer; font-size: 15px; font-weight: 600; }
+    button.secondary { background:#95a5a6; }
+    button.small { padding: 6px 12px; font-size: 13px; }
+    button:disabled { background:#e5e7eb !important; color:#9ca3af !important; opacity:1; cursor:not-allowed; box-shadow:none; }
+    .result-list { margin-top: 10px; }
+    .result-item { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px; border:1px solid #e5e7eb; border-radius:8px; margin-bottom:8px; cursor:pointer; background:#fff; transition: background .12s, border-color .12s; }
+    .result-item:hover { background: #f0f7ff; border-color: var(--accent); }
+    .result-item.selected { background:#e8f4ff; border-color: var(--accent); }
+    .result-item .rinfo { flex: 1 1 auto; min-width: 0; color:#444; line-height: 1.55; word-break: keep-all; overflow-wrap: anywhere; }
+    .result-item .rinfo .name-line { font-size: 16px; font-weight: 700; color: var(--primary); margin-bottom: 3px; }
+    .result-item .rinfo .info-line { font-size: 13px; color: #555; }
+    .result-item .chevron { flex-shrink: 0; color: #cbd5e1; font-size: 24px; font-weight: bold; line-height: 1; padding-right: 2px; }
+    .result-item:hover .chevron, .result-item.selected .chevron { color: var(--accent); }
+    .rinfo { font-size: 13px; color:#444; line-height: 1.5; }
+    .rinfo b { color: var(--primary); font-size: 15px; }
+    .rinfo .meta { color:#777; font-size:12px; }
+    .selected-info-box { background:#f8fafc; padding:12px; border-radius:6px; display:flex; gap:12px; align-items:flex-start; }
+    .selected-info-box .si-thumb { width: 72px; height: 100px; flex-shrink: 0; object-fit: cover; border: 1px solid #e5e7eb; border-radius: 4px; background: #f3f4f6; }
+    .selected-info-box .si-thumb-placeholder { width: 72px; height: 100px; flex-shrink: 0; border: 1px dashed #cbd5e1; border-radius: 4px; background: #f3f4f6; display: flex; align-items: center; justify-content: center; color: #9ca3af; font-size: 11px; text-align: center; }
+    .selected-info-box .si-info { flex: 1 1 auto; min-width: 0; font-size: 13px; color: #444; line-height: 1.55; word-break: keep-all; }
+    .selected-info-box .si-info .si-name { font-size: 15px; font-weight: 700; color: var(--primary); }
+    .selected-info-box .si-info .meta { color:#777; font-size:12px; margin-top:4px; }
+    .field-grid { display:flex; gap:10px; flex-wrap:wrap; margin-bottom: 8px; }
+    .field-col { flex: 1 1 220px; min-width: 0; }
+    .field-full { margin-bottom: 8px; }
+    .field-label { display:block; font-size:12px; color:#555; margin-bottom:3px; font-weight: 600; }
+    .field-grid input, .field-full input { padding: 10px; border:1px solid #d1d5db; border-radius:6px; font-size: 14px; width: 100%; }
+    .drop-zone { border: 2px dashed var(--accent); border-radius: 10px; padding: 28px 16px; text-align:center; color:#1f3b57; background:#eff6ff; transition: border-color .15s, background .15s; cursor: pointer; word-break: keep-all; overflow-wrap: anywhere; }
+    .drop-zone.drag { border-color: var(--primary); background:#dbeafe; }
+    /* 이번 수집 대상: 사진, 출생지 강조 */
+    .field-highlight { background: #fff8e1; border: 1px solid #ffd54f; border-radius: 8px; padding: 10px 12px; margin-top: 4px; }
+    .field-highlight .field-label { color: #b26a00; font-weight: 700; }
+    .field-highlight input { background: #fff; border-color: #ffca28; }
+    .field-highlight input:focus { outline: none; border-color: #f39c12; box-shadow: 0 0 0 2px rgba(243,156,18,0.25); }
+    .section-title-highlight { color: #b26a00 !important; font-size: 16px !important; font-weight: 700; }
+    .section-title-highlight .badge { display: inline-block; background: #f39c12; color: #fff; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; margin-right: 6px; vertical-align: middle; }
+    .drop-zone .dz-main { font-size: 15px; line-height: 1.5; }
+    .drop-zone .dz-text-mobile { display: none; }
+    input[type=file]#fileInput { display:none !important; }
+    .thumb-wrap { display:flex; gap:16px; align-items:flex-start; margin-top:12px; }
+    .thumb { width: 200px; height: 300px; object-fit: cover; border:1px solid #e5e7eb; border-radius:6px; background:#f3f4f6; }
+    .thumb-meta { font-size:13px; color:#444; line-height:1.7; }
+    .msg { padding: 10px 12px; border-radius:6px; margin-top:10px; font-size: 14px; display:none; }
+    .msg.show { display:block; }
+    .msg.ok { background:#e9f8ef; color:#145a32; border:1px solid #27ae60; }
+    .msg.err { background:#fdecea; color:#b71c1c; border:1px solid #e74c3c; }
+    .msg.warn { background:#fef5e7; color:#7d5b00; border:1px solid #f39c12; }
+    .muted { color:#666; font-size: 12px; }
+    #loading { position: fixed; inset:0; background: rgba(255,255,255,0.75); display:none; align-items:center; justify-content:center; z-index:9999; }
+    #loading.show { display:flex; }
+    .spinner { border: 4px solid #e5e7eb; border-top: 4px solid var(--accent); border-radius: 50%; width: 36px; height: 36px; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 520px) {
+      .thumb { width: 150px; height: 225px; }
+      .thumb-wrap { flex-direction: column; }
+      .header h2 { font-size: 20px; }
+      .drop-zone { padding: 18px 12px; }
+      .drop-zone .dz-main { font-size: 14px; }
+      .drop-zone .dz-text-desktop { display: none; }
+      .drop-zone .dz-text-mobile { display: inline; }
+    }
+  </style>
+</head>
+<body>
+  <div id="loading"><div class="spinner"></div></div>
+
+  <div class="container">
+    <div class="header">
+      <h2>회원 정보 수정</h2>
+      <div class="header-inline">
+        <p class="hint hint-title">사진제출</p>
+        <p class="hint hint-item">* 최소 해상도 400 × 600 px</p>
+        <p class="hint hint-title">출생지 입력</p>
+        <p class="hint hint-item">* 예) 전라북도 완주군 경천면 가천리</p>
+      </div>
+    </div>
+
+    <!-- 1. 조회 -->
+    <div class="card">
+      <div class="row search-row">
+        <input type="text" id="nameInput" placeholder="이름을 입력하세요" autocomplete="off">
+        <button id="searchBtn" onclick="doSearch()">조회</button>
+      </div>
+      <div id="searchMsg" class="msg"></div>
+      <div id="resultList" class="result-list"></div>
+    </div>
+
+    <!-- 2. 선택된 회원 + 회원 정보 수정 + 사진 업로드 -->
+    <div class="card" id="uploadCard" style="display:none;">
+      <h3 style="margin:0 0 12px; color:var(--primary); font-size:16px;">선택된 회원</h3>
+      <div id="selectedInfo" class="selected-info-box"></div>
+
+      <h3 style="margin:16px 0 8px; color:var(--primary); font-size:14px;">회원 정보 <span style="color:#888; font-weight:normal; font-size:12px;">(수정할 항목만 입력 · 비워두면 기존값 유지)</span></h3>
+      <div class="field-grid">
+        <div class="field-col">
+          <label class="field-label" for="memberPhone">전화번호</label>
+          <input type="text" id="memberPhone" autocomplete="off" maxlength="50">
+        </div>
+        <div class="field-col">
+          <label class="field-label" for="memberEmail">E-mail</label>
+          <input type="email" id="memberEmail" autocomplete="off" maxlength="100">
+        </div>
+      </div>
+      <div class="field-full">
+        <label class="field-label" for="memberAddress">주소</label>
+        <input type="text" id="memberAddress" autocomplete="off" maxlength="200">
+      </div>
+      <div class="field-grid">
+        <div class="field-col">
+          <label class="field-label" for="memberJob">직업</label>
+          <input type="text" id="memberJob" autocomplete="off" maxlength="50">
+        </div>
+        <div class="field-col">
+          <label class="field-label" for="memberCompany">직장명</label>
+          <input type="text" id="memberCompany" autocomplete="off" maxlength="100">
+        </div>
+      </div>
+      <div class="field-full field-highlight">
+        <h3 class="section-title-highlight" style="margin:0 0 8px;"><span class="badge">필수</span> 출생지</h3>
+        <input type="text" id="birthPlaceInput" autocomplete="off" maxlength="100">
+      </div>
+
+      <h3 class="section-title-highlight" style="margin:20px 0 8px;"><span class="badge">필수</span> 사진</h3>
+      <input type="file" id="fileInput" accept="image/jpeg,image/png,image/gif,image/webp" hidden>
+      <!-- 드롭존: 사진 미선택 상태에서만 표시 -->
+      <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+        <div class="dz-main">
+          <span class="dz-text-desktop"><b>사진을 선택하거나</b> 이 영역으로 드래그하세요</span>
+          <span class="dz-text-mobile"><b>탭하여 사진을 선택하세요</b></span>
+        </div>
+        <div class="muted" style="margin-top:6px;">JPG / PNG / GIF / WEBP · 최소 400 × 600 px · 최대 15 MB</div>
+      </div>
+      <!-- 미리보기: 사진 선택 시 드롭존 자리에 표시 -->
+      <div class="thumb-wrap" id="previewWrap" style="display:none;">
+        <img id="previewImg" class="thumb" alt="미리보기">
+        <div class="thumb-meta">
+          <div id="fileMeta"></div>
+          <button class="secondary small" onclick="clearFile()" style="margin-top:8px;">다른 사진 선택</button>
+        </div>
+      </div>
+
+      <div id="uploadMsg" class="msg"></div>
+
+      <button id="uploadBtn" onclick="doUpload()" disabled style="margin-top:14px; width:100%;">저장</button>
+    </div>
+  </div>
+
+<script>
+  var MIN_W = 400, MIN_H = 600;
+  var MAX_FILE_BYTES = 15 * 1024 * 1024; // 15 MiB 하드 리밋
+  var MAX_RETRIES = 3;
+
+  var selectedMember = null;
+  var selectedFile = null;
+  var selectedFileBase64 = null;
+  var selectedDim = null;
+  var pendingExtras = null; // { phone, email, address, job, company, birth_place }
+  var originalExtras = null; // 선택된 회원의 원본 값 (수정 여부 판정용)
+  var uploading = false;
+  var searching = false;
+  var searchSeq = 0;
+
+  // ---------- UI helpers ----------
+  function showLoading(on) { document.getElementById('loading').classList.toggle('show', !!on); }
+  function showMsg(id, text, type) {
+    var el = document.getElementById(id);
+    el.className = 'msg show ' + (type || 'ok');
+    el.textContent = text;
+  }
+  function hideMsg(id) {
+    var el = document.getElementById(id);
+    el.className = 'msg';
+    el.textContent = '';
+  }
+
+  // ---------- search ----------
+  // Enter 키 처리: keydown이면 auto-repeat로 쏟아질 수 있어 keyup 사용.
+  // 이미 검색 중이면 무시한다.
+  document.getElementById('nameInput').addEventListener('keyup', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!searching) doSearch();
+    }
+  });
+
+  function clearResults() {
+    document.getElementById('resultList').innerHTML = '';
+    hideMsg('searchMsg');
+    hideSelected();
+  }
+
+  function hideSelected() {
+    selectedMember = null;
+    document.getElementById('uploadCard').style.display = 'none';
+    clearFile();
+  }
+
+  function doSearch() {
+    if (searching) return; // 재진입 가드
+    var name = document.getElementById('nameInput').value.trim();
+    if (!name) {
+      showMsg('searchMsg', '이름을 입력하세요.', 'warn');
+      return;
+    }
+    searching = true;
+    var mySeq = ++searchSeq;
+    clearResults();
+    showLoading(true);
+    document.getElementById('searchBtn').disabled = true;
+
+    google.script.run
+      .withSuccessHandler(function(list) {
+        searching = false;
+        showLoading(false);
+        document.getElementById('searchBtn').disabled = false;
+        // 더 최근 검색이 있었다면 오래된 응답은 무시
+        if (mySeq !== searchSeq) return;
+        renderResults(list || []);
+      })
+      .withFailureHandler(function(err) {
+        searching = false;
+        showLoading(false);
+        document.getElementById('searchBtn').disabled = false;
+        if (mySeq !== searchSeq) return;
+        showMsg('searchMsg', '조회 실패: ' + (err && err.message ? err.message : err), 'err');
+      })
+      .searchMembersForPhoto(name);
+  }
+
+  function renderResults(list) {
+    var box = document.getElementById('resultList');
+    if (!list.length) {
+      showMsg('searchMsg', '일치하는 회원을 찾을 수 없습니다.', 'warn');
+      return;
+    }
+    if (list.length === 1) {
+      // 결과 1건이어도 목록 한 줄은 보여주고 자동 선택
+      box.appendChild(buildResultItem(list[0], true));
+      selectMember(list[0]);
+      return;
+    }
+    showMsg('searchMsg', list.length + '명이 조회되었습니다. 대상 회원을 선택하세요.', 'warn');
+    for (var i = 0; i < list.length; i++) {
+      box.appendChild(buildResultItem(list[i], false));
+    }
+  }
+
+  function buildResultItem(m, autoSelected) {
+    var el = document.createElement('div');
+    el.className = 'result-item' + (autoSelected ? ' selected' : '');
+    el.setAttribute('role', 'button');
+    el.setAttribute('tabindex', '0');
+    // 문자열 연결로 구성 (Apps Script HtmlService 의 multi-line template literal 파싱 이슈 회피)
+    var html = '';
+    html += '<div class="rinfo">';
+    html += '<div class="name-line">' + escapeHtml(m.name || '-') + '</div>';
+    html += '<div class="info-line">';
+    html += '회원번호 ' + escapeHtml(m.member_id || '-');
+    html += ' · 소속 ' + escapeHtml(m.dept_name || '-');
+    html += ' · 상태 ' + escapeHtml(m.status || '-');
+    html += ' · 법계 ' + escapeHtml(m.rank || '-');
+    html += '</div>';
+    html += '</div>';
+    html += '<span class="chevron" aria-hidden="true">&#8250;</span>';
+    el.innerHTML = html;
+    el.addEventListener('click', function(){
+      var items = document.querySelectorAll('.result-item');
+      for (var i = 0; i < items.length; i++) items[i].classList.remove('selected');
+      el.classList.add('selected');
+      selectMember(m);
+    });
+    return el;
+  }
+
+  function driveThumbUrl_(url) {
+    if (!url) return '';
+    var s = String(url);
+    var m = s.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (!m) return '';
+    return 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w200';
+  }
+
+  // 기존 값이 있으면 input 에 직접 채워서 검정색으로 보이게 함. 없으면 예시를 placeholder 로만 둠.
+  function setPrefillPlaceholder_(elId, currentValue, example) {
+    var el = document.getElementById(elId);
+    if (!el) return;
+    el.value = currentValue || '';
+    el.placeholder = example || '';
+  }
+
+  function selectMember(m) {
+    // 이전 회원에서 고른 파일이 새 회원에게 업로드되는 사고를 방지
+    clearFile();
+    selectedMember = m;
+
+    // 선택된 회원 정보 박스 (썸네일 + 기본 정보) - 문자열 연결로 구성 (template literal 회피)
+    var info = document.getElementById('selectedInfo');
+    var thumbUrl = driveThumbUrl_(m.photo);
+    var thumbHtml;
+    if (thumbUrl) {
+      thumbHtml = '<img class="si-thumb" src="' + escapeHtml(thumbUrl) + '" alt="사진" onerror="this.style.display=\'none\';">';
+    } else {
+      thumbHtml = '<div class="si-thumb-placeholder">사진 없음</div>';
+    }
+
+    var nameLine = '<div class="si-name">' + escapeHtml(m.name) +
+      ' <span style="font-weight:normal;color:#666;">(회원번호 ' + escapeHtml(m.member_id) + ')</span></div>';
+    var deptLine = '<div>소속: ' + escapeHtml(m.dept_name || '-');
+    if (m.rank) deptLine += ' · 법계: ' + escapeHtml(m.rank);
+    deptLine += '</div>';
+    var metaText = m.photo ? '기존 사진이 있습니다. 새 사진을 올리면 덮어쓰기 됩니다.' : '기존 사진이 없습니다.';
+    var metaLine = '<div class="meta">' + metaText + '</div>';
+
+    info.innerHTML = thumbHtml + '<div class="si-info">' + nameLine + deptLine + metaLine + '</div>';
+
+    // 원본 값 보관 (수정 여부 판정용)
+    originalExtras = {
+      phone:       m.phone       || '',
+      email:       m.email       || '',
+      address:     m.address     || '',
+      job:         m.job         || '',
+      company:     m.company     || '',
+      birth_place: m.birth_place || ''
+    };
+
+    // 입력 필드에 기존 값을 직접 채워 검정색으로 표시
+    setPrefillPlaceholder_('memberPhone', originalExtras.phone, '예: 010-1234-5678');
+    setPrefillPlaceholder_('memberEmail', originalExtras.email, '예: user@example.com');
+    setPrefillPlaceholder_('memberAddress', originalExtras.address, '예: 서울시 ...');
+    setPrefillPlaceholder_('memberJob', originalExtras.job, '예: 회사원');
+    setPrefillPlaceholder_('memberCompany', originalExtras.company, '예: 카카오');
+    setPrefillPlaceholder_('birthPlaceInput', originalExtras.birth_place, '예: 전라북도 완주군 경천면 가천리');
+
+    // 수정 사항이 생겨야 저장 버튼 활성화
+    updateUploadBtnState_();
+
+    document.getElementById('uploadCard').style.display = 'block';
+    hideMsg('uploadMsg');
+    setTimeout(function(){ document.getElementById('uploadCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
+  }
+
+  // ---------- file handling ----------
+  var dropZone = document.getElementById('dropZone');
+  var fileInput = document.getElementById('fileInput');
+
+  fileInput.addEventListener('change', function(e) {
+    handleFile(e.target.files && e.target.files[0]);
+  });
+
+  ['dragenter','dragover'].forEach(function(evt) {
+    dropZone.addEventListener(evt, function(e) {
+      e.preventDefault(); e.stopPropagation(); dropZone.classList.add('drag');
+    });
+  });
+  ['dragleave','drop'].forEach(function(evt) {
+    dropZone.addEventListener(evt, function(e) {
+      e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('drag');
+    });
+  });
+  dropZone.addEventListener('drop', function(e) {
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  });
+
+  // 입력 필드 변경 시 저장 버튼 활성화 상태 갱신
+  ['memberPhone','memberEmail','memberAddress','memberJob','memberCompany','birthPlaceInput'].forEach(function(fid){
+    var el = document.getElementById(fid);
+    if (el) el.addEventListener('input', updateUploadBtnState_);
+  });
+
+  function handleFile(file) {
+    if (!file) return;
+    hideMsg('uploadMsg');
+
+    if (!/^image\/(jpeg|png|gif|webp)$/i.test(file.type)) {
+      showMsg('uploadMsg', '지원하지 않는 파일 형식입니다. JPG/PNG/GIF/WEBP만 업로드할 수 있습니다.', 'err');
+      return;
+    }
+
+    // 파일 크기 상한 검증 (이미지 로딩 전에 조기 거부)
+    if (file.size > MAX_FILE_BYTES) {
+      var cur = formatBytes(file.size);
+      var max = formatBytes(MAX_FILE_BYTES);
+      showMsg('uploadMsg',
+        '⚠️ 파일 크기가 너무 큽니다.\n현재: ' + cur + '\n최대: ' + max + '\n다른 사진을 선택해 주세요.', 'err');
+      try {
+        alert('파일 크기가 너무 큽니다.\n\n현재: ' + cur + '\n최대: ' + max + '\n\n다른 사진을 선택하거나, 촬영 설정에서 해상도를 낮춰 다시 찍어주세요.');
+      } catch (e) {}
+      clearFile();
+      return;
+    }
+
+    var url = URL.createObjectURL(file);
+    var img = new Image();
+    img.onload = function() {
+      var w = img.naturalWidth, h = img.naturalHeight;
+
+      if (w < MIN_W || h < MIN_H) {
+        URL.revokeObjectURL(url);
+        showMsg('uploadMsg',
+          '⚠️ 사진 해상도가 너무 작습니다.\n현재 해상도: ' + w + ' × ' + h + ' px\n필요 해상도: 최소 ' + MIN_W + ' × ' + MIN_H + ' px\n다른 사진을 업로드해 주세요.', 'err');
+        try { alert('사진 해상도가 너무 작습니다.\n\n현재: ' + w + ' × ' + h + ' px\n필요: 최소 ' + MIN_W + ' × ' + MIN_H + ' px\n\n다른 사진을 업로드해 주세요.'); } catch (e) {}
+        clearFile();
+        return;
+      }
+
+      // 원본 그대로 base64 로 읽어 사용 (리사이즈/재인코딩 없음)
+      var reader = new FileReader();
+      reader.onload = function() {
+        URL.revokeObjectURL(url);
+        selectedFile = file;
+        selectedFileBase64 = reader.result;
+        selectedDim = { w: w, h: h };
+
+        document.getElementById('dropZone').style.display = 'none';
+        document.getElementById('previewImg').src = reader.result;
+        document.getElementById('previewWrap').style.display = 'flex';
+        document.getElementById('fileMeta').innerHTML =
+          '<b>' + escapeHtml(file.name) + '</b><br>' +
+          '해상도: ' + w + ' × ' + h + ' px<br>' +
+          '크기: ' + formatBytes(file.size);
+        updateUploadBtnState_();
+        showMsg('uploadMsg', '사진이 준비되었습니다. [저장] 버튼을 눌러주세요.', 'ok');
+      };
+      reader.onerror = function() {
+        URL.revokeObjectURL(url);
+        showMsg('uploadMsg', '파일을 읽을 수 없습니다.', 'err');
+      };
+      reader.readAsDataURL(file);
+    };
+    img.onerror = function() {
+      URL.revokeObjectURL(url);
+      showMsg('uploadMsg', '이미지를 열 수 없습니다. 손상된 파일일 수 있습니다.', 'err');
+    };
+    img.src = url;
+  }
+
+  function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+  }
+
+  function clearFile() {
+    selectedFile = null;
+    selectedFileBase64 = null;
+    selectedDim = null;
+    fileInput.value = '';
+    document.getElementById('previewWrap').style.display = 'none';
+    document.getElementById('previewImg').src = '';
+    document.getElementById('dropZone').style.display = '';
+    updateUploadBtnState_();
+  }
+
+  // 저장 버튼은 회원이 선택되고 + 수정 사항(사진 OR 입력 필드가 원본과 다름)이 있을 때만 활성화
+  function updateUploadBtnState_() {
+    var btn = document.getElementById('uploadBtn');
+    if (!btn) return;
+    if (!selectedMember) { btn.disabled = true; return; }
+    var hasPhoto = !!(selectedFile && selectedFileBase64);
+    var cur = collectExtras_();
+    var changed = false;
+    if (originalExtras) {
+      for (var k in cur) {
+        if (cur.hasOwnProperty(k) && cur[k] !== (originalExtras[k] || '')) { changed = true; break; }
+      }
+    } else {
+      changed = !!(cur.phone || cur.email || cur.address || cur.job || cur.company || cur.birth_place);
+    }
+    btn.disabled = !(hasPhoto || changed);
+  }
+
+  // ---------- upload (with retry for traffic bursts) ----------
+  function collectExtras_() {
+    return {
+      phone:       (document.getElementById('memberPhone').value       || '').trim(),
+      email:       (document.getElementById('memberEmail').value       || '').trim(),
+      address:     (document.getElementById('memberAddress').value     || '').trim(),
+      job:         (document.getElementById('memberJob').value         || '').trim(),
+      company:     (document.getElementById('memberCompany').value     || '').trim(),
+      birth_place: (document.getElementById('birthPlaceInput').value   || '').trim()
+    };
+  }
+
+  function doUpload() {
+    if (uploading) return;
+    if (!selectedMember) { showMsg('uploadMsg', '회원을 먼저 선택하세요.', 'err'); return; }
+
+    var hasPhoto = !!(selectedFile && selectedFileBase64);
+    var cur = collectExtras_();
+    // 원본과 실제로 다른 값만 서버로 전송 (변경되지 않은 필드는 보내지 않음)
+    var extras = {};
+    var hasExtras = false;
+    for (var k in cur) {
+      if (!cur.hasOwnProperty(k)) continue;
+      var orig = originalExtras ? (originalExtras[k] || '') : '';
+      if (cur[k] !== orig) { extras[k] = cur[k]; hasExtras = true; }
+    }
+
+    if (!hasPhoto && !hasExtras) {
+      showMsg('uploadMsg', '저장할 내용이 없습니다. 사진이나 회원 정보 중 하나 이상을 수정해주세요.', 'warn');
+      return;
+    }
+
+    pendingExtras = extras;
+    uploading = true;
+    document.getElementById('uploadBtn').disabled = true;
+    showLoading(true);
+    showMsg('uploadMsg', '저장 중...', 'warn');
+    uploadOnce(1, hasPhoto);
+  }
+
+  function uploadOnce(attempt, hadPhoto) {
+    google.script.run
+      .withSuccessHandler(function(res) {
+        showLoading(false);
+        uploading = false;
+        var nm = selectedMember.name;
+        var id = selectedMember.member_id;
+        var photoNote = hadPhoto ? '사진' : '';
+        var hasAnyInfo = false;
+        if (pendingExtras) {
+          for (var k in pendingExtras) {
+            if (pendingExtras.hasOwnProperty(k) && pendingExtras[k]) { hasAnyInfo = true; break; }
+          }
+        }
+        var infoNote = hasAnyInfo ? '정보' : '';
+        var savedParts = [];
+        if (photoNote) savedParts.push(photoNote);
+        if (infoNote) savedParts.push(infoNote);
+        var savedLabel = savedParts.length ? savedParts.join(' + ') : '내용';
+        if (res && res.immediate_processed) {
+          showMsg('uploadMsg',
+            '✅ ' + nm + ' (' + id + ') ' + savedLabel + ' 저장이 Members 시트에 반영되었습니다. 다음 회원으로 이동하려면 다시 조회하세요.', 'ok');
+        } else {
+          showMsg('uploadMsg',
+            '✅ ' + nm + ' (' + id + ') ' + savedLabel + ' 접수 완료. 최대 1분 이내에 Members 시트에 반영됩니다. 다음 회원으로 이동하려면 다시 조회하세요.', 'ok');
+        }
+        // selectedMember + originalExtras 에 방금 저장한 값들을 반영 (새 기준)
+        if (selectedMember && pendingExtras) {
+          if (pendingExtras.phone       !== undefined) selectedMember.phone       = pendingExtras.phone;
+          if (pendingExtras.email       !== undefined) selectedMember.email       = pendingExtras.email;
+          if (pendingExtras.address     !== undefined) selectedMember.address     = pendingExtras.address;
+          if (pendingExtras.job         !== undefined) selectedMember.job         = pendingExtras.job;
+          if (pendingExtras.company     !== undefined) selectedMember.company     = pendingExtras.company;
+          if (pendingExtras.birth_place !== undefined) selectedMember.birth_place = pendingExtras.birth_place;
+        }
+        if (originalExtras && pendingExtras) {
+          for (var pk in pendingExtras) {
+            if (pendingExtras.hasOwnProperty(pk)) originalExtras[pk] = pendingExtras[pk];
+          }
+        }
+        // 사진 초기화 (입력 필드는 현재 값 유지 = 새 원본과 동일하므로 변경 없음 상태)
+        clearFile();
+        // 저장 후에는 수정 사항이 없으므로 다시 비활성화 (필드/사진 변경 시 자동 활성화됨)
+        updateUploadBtnState_();
+        pendingExtras = null;
+      })
+      .withFailureHandler(function(err) {
+        var msg = (err && err.message) ? String(err.message) : String(err);
+        // 큐 방식에서는 락 타임아웃으로 실패할 일이 거의 없지만, 네트워크/일시적 오류는 재시도한다.
+        var retryable = /network|timeout|대기|시간|lock|Lock|LOCK|일시|잠시|temporar/i.test(msg);
+        if (retryable && attempt < MAX_RETRIES) {
+          var delay = 600 * attempt + Math.random() * 400;
+          showMsg('uploadMsg', '일시 오류로 재시도 중... (' + attempt + '/' + MAX_RETRIES + ')', 'warn');
+          setTimeout(function() { uploadOnce(attempt + 1, hadPhoto); }, delay);
+          return;
+        }
+        showLoading(false);
+        uploading = false;
+        updateUploadBtnState_();
+        showMsg('uploadMsg', '❌ 저장 실패: ' + msg, 'err');
+      })
+      .uploadMemberPhotoDirect(
+        selectedMember.member_id,
+        hadPhoto ? selectedFileBase64 : '',
+        hadPhoto && selectedFile ? selectedFile.name : '',
+        'PHOTO_UPLOAD_TOOL',
+        selectedMember.name || '',
+        pendingExtras || {}
+      );
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+</script>
+</body>
+</html>

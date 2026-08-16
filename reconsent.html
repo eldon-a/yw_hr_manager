@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body{font-family:system-ui,-apple-system;margin:16px;}
+    .card{border:1px solid #ddd;border-radius:10px;padding:12px;margin:10px 0;}
+    button,input{padding:10px;font-size:14px;}
+    .muted{color:#666;font-size:12px;}
+  </style>
+</head>
+<body>
+<h2>개인정보 재동의</h2>
+
+<div class="card">
+  <div class="muted">링크를 통해 들어오신 경우에만 동의가 가능합니다.</div>
+  <div class="muted">토큰:</div>
+  <input id="token" style="width:100%" readonly>
+  <div style="height:10px"></div>
+  <input id="ver" placeholder="동의 버전(예: v1.0)" value="v1.0" style="width:100%">
+  <div style="height:10px"></div>
+  <button onclick="agree()">동의하고 제출</button>
+</div>
+
+<script>
+function getParam(name){
+  const url = new URL(window.location.href);
+  return url.searchParams.get(name) || '';
+}
+document.getElementById('token').value = getParam('token');
+
+function agree(){
+  const token = document.getElementById('token').value;
+  const ver = document.getElementById('ver').value.trim() || 'v1.0';
+  if (!token){ alert('토큰이 없습니다.'); return; }
+  google.script.run.withSuccessHandler(()=>alert('동의가 완료되었습니다.'))
+    .withFailureHandler(e=>alert(e.message||e))
+    .submitReconsentByToken(token, ver);
+}
+</script>
+</body>
+</html>
+
