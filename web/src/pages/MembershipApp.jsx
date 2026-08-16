@@ -368,7 +368,7 @@ function StaffLogin({ onBack, onSubmit }) {
       <form className="card" onSubmit={submit}>
         <div className="form-grid">
           <Field label="이메일" required className="full"><input type="email" name="email" autoComplete="username" placeholder="name@example.com" required /></Field>
-          <Field label="비밀번호 (선택)" hint="yw_insa@tmp.com 부서담당자 계정은 비밀번호를 생략할 수 있습니다." className="full"><input type="password" name="password" autoComplete="current-password" /></Field>
+          <Field label="비밀번호" hint="일반 계정은 필수입니다. yw_insa@tmp.com 부서담당자 계정만 생략할 수 있습니다." className="full"><input type="password" name="password" autoComplete="current-password" /></Field>
         </div>
         <div className="button-row end"><button type="button" className="button ghost" onClick={onBack}>뒤로</button><button className="button primary">로그인</button></div>
       </form>

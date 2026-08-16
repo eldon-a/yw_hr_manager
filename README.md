@@ -61,6 +61,7 @@ hr_manager_new/
 1. 현재 회원관리 스프레드시트의 **확장 프로그램 → Apps Script**를 엽니다.
 2. 기존 운영 코드는 백업한 뒤 [`apps-script/Code.gs`](apps-script/Code.gs) 내용으로 교체합니다.
 3. 기존 사진 큐를 사용한다면 `setupPhotoUploadTrigger()`를 한 번 실행해 1분 트리거를 확인합니다.
+   과거 대기 신청에 사진·문서가 많다면 `compactPendingRequestPayloads()`도 한 번 실행합니다.
 4. **배포 → 새 배포 → 웹 앱**을 선택합니다.
    - 실행 계정: 나
    - 액세스 권한: 운영 정책에 맞게 설정

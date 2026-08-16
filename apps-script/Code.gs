@@ -1454,6 +1454,28 @@ function sanitizeRequestPayloadForClient_(raw) {
   }
 }
 
+/**
+ * 기존 Requests 시트의 대기 요청에 남은 사진/문서 base64를 한 번 정리하는 관리 함수.
+ * 새 버전 배포 후 Apps Script 편집기에서 1회 실행하면 과거 업로드 요청의 첫 조회도 가벼워진다.
+ */
+function compactPendingRequestPayloads() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const reqSheet = ss.getSheetByName(SHEETS.REQUESTS);
+  if (!reqSheet || reqSheet.getLastRow() < 2) return '정리할 요청이 없습니다.';
+  const pending = getPendingRequestRows_(reqSheet, 9);
+  let changed = 0;
+  for (let i = 0; i < pending.length; i++) {
+    const raw = String(pending[i].row[8] || '');
+    const compact = sanitizeRequestPayloadForClient_(raw);
+    if (compact !== raw) {
+      reqSheet.getRange(pending[i].row_idx, 9).setValue(compact);
+      changed++;
+    }
+  }
+  invalidatePendingRequestsCache_();
+  return '대기 요청 payload 정리 완료: ' + changed + '건';
+}
+
 function checkDuplicateRequest_(reqSheet, type, safeId, safeName, targetDeptId) {
   const lastRow = reqSheet.getLastRow();
   if (lastRow < 2) return null;
@@ -1545,7 +1567,7 @@ function cachePendingRequestsResult_(list) {
   try {
     const text = JSON.stringify(list || []);
     // CacheService 단일 값 제한(약 100KB)보다 여유 있게 작을 때만 캐시한다.
-    if (text.length < 90000) {
+    if (Utilities.newBlob(text).getBytes().length < 95000) {
       CacheService.getScriptCache().put(PENDING_REQUESTS_CACHE_KEY, text, PENDING_REQUESTS_CACHE_SECONDS);
     }
   } catch (e) {}
