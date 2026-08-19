@@ -389,13 +389,30 @@ function getMemberHeaders() {
   return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(h => h !== "");
 }
 
-function calculateAge(birthDateStr) {
-  if(!birthDateStr) return '';
+function calculateAge(birthDateValue) {
+  if (!birthDateValue) return '';
   try {
-    const birth = new Date(birthDateStr);
-    if (isNaN(birth.getTime())) return '';
-    const today = new Date();
-    return today.getFullYear() - birth.getFullYear() + 1; 
+    let birthYear = 0;
+
+    // 시트 날짜 셀은 Date 객체로 들어온다. 스크립트/시트 시간대 차이를 피하기 위해
+    // getFullYear() 대신 애플리케이션 시간대로 연도만 추출한다.
+    if (birthDateValue instanceof Date && !isNaN(birthDateValue.getTime())) {
+      birthYear = Number(Utilities.formatDate(birthDateValue, APP_TIMEZONE, 'yyyy'));
+    } else {
+      const raw = String(birthDateValue).trim();
+      // 가입 폼의 yyyy-MM-dd뿐 아니라 yyyy.MM.dd, yyyy/MM/dd, yyyymmdd도 동일하게 처리한다.
+      const yearMatch = /^(\d{4})(?:[-.\/년]|\d{4}$)/.exec(raw);
+      if (yearMatch) {
+        birthYear = Number(yearMatch[1]);
+      } else {
+        const parsed = toDateInAppTimeZone(raw);
+        if (parsed) birthYear = Number(Utilities.formatDate(parsed, APP_TIMEZONE, 'yyyy'));
+      }
+    }
+
+    const currentYear = Number(Utilities.formatDate(new Date(), APP_TIMEZONE, 'yyyy'));
+    if (!birthYear || birthYear < 1800 || birthYear > currentYear) return '';
+    return currentYear - birthYear + 1;
   } catch(e) { return ''; }
 }
 
@@ -1523,6 +1540,17 @@ function processAdminAction(reqId, action, adminEmail) {
     if(map['updated_at']!==undefined) newRow[map['updated_at']] = nowStr;
     
     memSheet.appendRow(newRow);
+
+    // appendRow 후 시트가 생년월일 문자열을 실제 날짜 값으로 변환할 수 있다.
+    // updateAllAges()와 동일하게 저장된 생일 셀을 다시 읽어 H열(나이)을 확정한다.
+    if (map[COLS.BIRTH] !== undefined && map[COLS.AGE] !== undefined) {
+      const insertedRow = findMemberRowById_(memSheet, map, newId);
+      if (insertedRow > 1) {
+        const savedBirth = memSheet.getRange(insertedRow, map[COLS.BIRTH] + 1).getValue();
+        const approvedAge = calculateAge(savedBirth || p.birth);
+        memSheet.getRange(insertedRow, map[COLS.AGE] + 1).setValue(approvedAge);
+      }
+    }
     histSheet.appendRow([Utilities.getUuid(), newId, 'JOIN', '', p.target_dept_id, '', '활동', '신규가입', reqId, adminEmail, nowStr, '신규등록']);
   
   } else {
