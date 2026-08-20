@@ -22,6 +22,14 @@ hr_manager_new/
 │   ├── .env.example
 │   ├── package.json
 │   └── vite.config.js
+├── viewer/                  # 조회 전용 별도 앱
+│   ├── src/
+│   │   ├── App.jsx          # 이름 검색 + 결과 목록
+│   │   ├── api.js           # getMemberCardsData 호출, 5개 항목만 추출
+│   │   └── styles.css
+│   ├── .env.example
+│   ├── package.json
+│   └── vite.config.js
 ├── Code.gs                  # 기존 GAS 버전(보존)
 └── *.html                   # 기존 GAS HTML 버전(보존)
 ```
@@ -88,6 +96,31 @@ npm run preview
 ```
 
 생성된 `web/dist/`를 Vercel, Netlify, GitHub Pages 또는 사내 정적 서버에 배포하면 됩니다.
+
+## 3. 회원조회 전용 앱 (`viewer/`)
+
+`web/`과 완전히 분리된 조회 전용 앱입니다. 이름으로 검색해 **사진·이름·회원번호·소속·법계**만 표시합니다.
+
+```bash
+cd viewer
+cp .env.example .env.local
+# VITE_API_URL에 web/.env.local과 동일한 Apps Script /exec URL 입력
+npm install
+npm run dev      # http://localhost:5175
+npm run build    # viewer/dist/ 를 정적 호스팅에 배포
+```
+
+- **Apps Script 수정·재배포가 필요 없습니다.** 이미 배포된 `getMemberCardsData`
+  (`mode: 'name'`)를 그대로 호출합니다. 이 액션은 관리자 세션을 요구하지 않습니다.
+- 검색은 **이름 정확 일치**입니다(기존 회원카드 화면과 동일). 동명이인은 모두 표시됩니다.
+- 응답에는 주소·전화번호 등이 함께 오지만 `viewer/src/api.js`의 `toViewerRow()`에서
+  5개 항목만 남기고 즉시 버리므로 화면·상태에는 남지 않습니다.
+  전송량까지 줄이려면 Apps Script에 조회 전용 액션을 추가해야 합니다.
+- 별도 로그인이 없으므로 URL을 아는 사람은 누구나 조회할 수 있습니다.
+  공개 범위는 호스팅 단계(사내망, 비공개 URL, 접근 제어)에서 통제하세요.
+- 부분 일치 검색이 필요하면 `Code.gs`의 `getMemberCardsData`에서
+  `mode === 'name'` 비교(`normalize(name) !== key`)를 `indexOf` 기반으로 바꾸거나
+  조회 전용 액션을 새로 추가하면 됩니다.
 
 ## 기존 데이터 호환
 

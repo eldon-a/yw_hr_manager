@@ -1,0 +1,72 @@
+:root {
+  font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  color: #2e2918;
+  background: #fbfaf5;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --primary: #ffc30e;
+  --primary-hover: #e6ac00;
+  --ink: #2e2918;
+  --muted: #756f5e;
+  --line: #e7dfc5;
+  --paper: #fffefa;
+  --soft: #fff6d6;
+  --red: #b9453f;
+  --shadow: 0 14px 44px rgba(92, 70, 0, .10);
+}
+
+* { box-sizing: border-box; }
+html { min-width: 320px; min-height: 100%; background: #fbfaf5; }
+body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 90% 0, #fff0b8 0, transparent 26rem), #fbfaf5; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+dl, dd, dt { margin: 0; }
+
+.shell { width: min(640px, calc(100% - 32px)); margin: 0 auto; padding: 26px 0 64px; }
+
+.brand { display: flex; align-items: center; gap: 11px; margin-bottom: 26px; }
+.brand-mark { flex: none; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px; background: var(--primary); color: var(--ink); font: 800 12px/1 system-ui; letter-spacing: .08em; box-shadow: 0 7px 16px rgba(184, 138, 0, .22); }
+.brand strong { display: block; font-size: 19px; letter-spacing: -.03em; }
+.brand small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+
+.search-bar { display: flex; gap: 8px; }
+.search-bar input { flex: 1; min-width: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); color: var(--ink); font-size: 16px; transition: border-color .18s ease, box-shadow .18s ease; }
+.search-bar input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--soft); }
+.search-bar input::placeholder { color: #b3ab95; }
+
+.button { flex: none; padding: 14px 22px; border: 0; border-radius: 14px; background: var(--primary); color: var(--ink); font-size: 15px; font-weight: 700; letter-spacing: -.01em; transition: background .18s ease, opacity .18s ease; }
+.button:hover:not(:disabled) { background: var(--primary-hover); }
+.button:disabled { opacity: .55; cursor: default; }
+
+.search-hint { margin: 10px 2px 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+
+.notice { display: flex; gap: 9px; margin-top: 18px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); font-size: 13.5px; line-height: 1.6; }
+.notice.error { border-color: #eccac8; background: #fdf4f3; color: var(--red); }
+
+.result-count { margin: 26px 2px 11px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+
+.result-list { margin: 22px 0 0; padding: 0; list-style: none; display: grid; gap: 11px; }
+
+.result-row { display: flex; gap: 15px; padding: 15px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); box-shadow: 0 5px 18px rgba(92, 70, 0, .04); }
+
+.photo { flex: none; width: 84px; height: 112px; display: grid; place-items: center; overflow: hidden; border-radius: 12px; border: 1px solid var(--line); background: var(--soft); }
+.photo img { width: 100%; height: 100%; object-fit: cover; }
+.photo-empty { color: #b3ab95; font-size: 11px; line-height: 1.5; text-align: center; }
+
+.info { flex: 1; min-width: 0; align-self: center; }
+.info-name { margin-bottom: 10px; font-size: 20px; font-weight: 800; letter-spacing: -.035em; overflow-wrap: anywhere; }
+.info-row { display: flex; gap: 10px; padding: 3px 0; font-size: 14px; line-height: 1.55; }
+.info-row dt { flex: none; width: 58px; color: var(--muted); font-size: 12.5px; padding-top: 1px; }
+.info-row dd { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+
+.empty-state { margin-top: 26px; padding: 40px 22px; border: 1px dashed var(--line); border-radius: 18px; text-align: center; background: rgba(255, 255, 255, .5); }
+.empty-state strong { display: block; font-size: 15px; }
+.empty-state p { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+
+.skeleton-row { height: 144px; border-radius: 18px; background: linear-gradient(100deg, #f3eedd 30%, #fbf7ea 50%, #f3eedd 70%) 0 0 / 220% 100%; animation: shimmer 1.3s ease-in-out infinite; }
+@keyframes shimmer { to { background-position: -120% 0; } }
+
+@media (max-width: 400px) {
+  .photo { width: 70px; height: 94px; }
+  .info-name { font-size: 18px; }
+}
