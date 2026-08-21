@@ -205,14 +205,15 @@ function apiJson_(obj) {
 }
 
 /**
- * 관리자는 로그인 직후 반드시 승인 대기 목록과 회원 헤더를 다시 불러온다.
- * Apps Script는 아무 일도 하지 않는 호출조차 왕복 1.5~3초가 들기 때문에,
- * 로그인 응답에 함께 실어 보내 왕복 2회를 줄인다.
- * 여기서 실패해도 로그인 자체는 막지 않는다(프런트가 개별 호출로 되돌아간다).
+ * 로그인 직후 어차피 다시 불러오는 값 중 '싼 것'만 응답에 함께 실어 보낸다.
+ * 회원 헤더는 헤더 행 하나만 읽으므로 비용이 거의 없다.
+ *
+ * 승인 대기 목록은 여기에 넣지 않는다. 요청 건수와 payload 크기에 따라 수 초가 걸릴 수 있는데,
+ * 그러면 로그인 화면이 그동안 멈춰 있는 것처럼 보인다. 목록은 대시보드를 먼저 띄운 뒤
+ * 화면 안에서 따로 불러온다.
  */
 function attachAdminBootstrap_(login) {
   if (!login || login.role !== 'ADMIN') return login;
-  try { login.pendingRequests = getPendingRequests(); } catch (e) { login.pendingRequests = null; }
   try { login.memberHeaders = getMemberHeaders(); } catch (e) { login.memberHeaders = null; }
   return login;
 }
@@ -1558,6 +1559,23 @@ function invalidatePendingRequestsCache_() {
   try { CacheService.getScriptCache().remove(PENDING_REQUESTS_CACHE_KEY); } catch (e) {}
 }
 
+/**
+ * 이미 파싱해 둔 payload에서 파일 본문만 걷어내 클라이언트용 문자열로 만든다.
+ * 원본 객체는 그대로 두어야 한다(변경 미리보기가 formData 유무를 본다).
+ */
+function sanitizeParsedPayloadForClient_(payload) {
+  try {
+    const clean = {};
+    Object.keys(payload || {}).forEach((k) => {
+      if (k === 'photoData' || k === 'formData') return;
+      clean[k] = payload[k];
+    });
+    return JSON.stringify(clean);
+  } catch (e) {
+    return '{}';
+  }
+}
+
 function sanitizeRequestPayloadForClient_(raw) {
   try {
     const payload = JSON.parse(raw || '{}');
@@ -1811,10 +1829,20 @@ function getPendingRequests() {
 
       // [중요] 신청서(Requests)에 저장된 현재 부서 ID 확인
       let curDeptId = String(row[5]).trim();
-      
-      if(reqType === 'NEW') { 
-        try { const p = JSON.parse(row[8]); age = calculateAge(p.birth); rank='신입'; } catch(e){} 
-      } else { 
+
+      // 같은 payload 문자열을 여러 번 파싱하면 과거 요청에 남은 대용량 base64에서 큰 비용이 된다.
+      // 행마다 한 번만 파싱해 재사용한다.
+      let parsedPayload;
+      const payloadOf = () => {
+        if (parsedPayload === undefined) {
+          try { parsedPayload = JSON.parse(row[8] || '{}'); } catch (e) { parsedPayload = {}; }
+        }
+        return parsedPayload;
+      };
+
+      if(reqType === 'NEW') {
+        try { age = calculateAge(payloadOf().birth); rank='신입'; } catch(e){}
+      } else {
         // 기존 회원인 경우, 회원 정보(memInfo) 확인
         if(memInfo[mid]) { 
           age = memInfo[mid].age; 
@@ -1846,7 +1874,7 @@ function getPendingRequests() {
         reason: row[7], 
         requester: row[11], 
         date: formatInAppTimeZone(row[12], "yyyy-MM-dd HH:mm"),
-        payload: sanitizeRequestPayloadForClient_(row[8]),
+        payload: sanitizeParsedPayloadForClient_(payloadOf()),
         photo_id: row[9],
         form_file_id: row[15] || '',
         age: age, 
@@ -1854,9 +1882,8 @@ function getPendingRequests() {
         changes: (() => {
           if (reqType !== 'UPDATE') return [];
           try {
-            const payload = JSON.parse(row[8] || '{}');
             const memberRow = (memInfo[mid] && memInfo[mid].row) ? memInfo[mid].row : null;
-            return buildUpdatePreviewChanges_(payload, memberRow, memberMap, deptMap, deptIdByName);
+            return buildUpdatePreviewChanges_(payloadOf(), memberRow, memberMap, deptMap, deptIdByName);
           } catch (e) {
             return [];
           }
@@ -1865,6 +1892,76 @@ function getPendingRequests() {
     } catch(e){} 
   }
   return cachePendingRequestsResult_(list);
+}
+
+/**
+ * 승인 대기 목록이 느릴 때 어느 단계에서 시간이 걸리는지 확인하는 진단 함수.
+ * Apps Script 편집기에서 이 함수를 선택해 실행한 뒤 [실행 로그]를 확인한다.
+ * 시트 데이터는 전혀 바꾸지 않는다(30초짜리 목록 캐시만 비운다).
+ */
+function diagnosePendingRequestsPerformance() {
+  const out = [];
+  const step = (label, fn) => {
+    const started = Date.now();
+    let value = null;
+    let note = '';
+    try { value = fn(); } catch (e) { note = '  ← 오류: ' + (e && e.message ? e.message : e); }
+    out.push('  ' + label + ': ' + (Date.now() - started) + 'ms' + note);
+    return value;
+  };
+
+  out.push('===== 승인 대기 목록 성능 진단 =====');
+  const ss = step('스프레드시트 열기', () => SpreadsheetApp.getActiveSpreadsheet());
+  if (!ss) { Logger.log(out.join('\n')); return out.join('\n'); }
+
+  const reqSheet = ss.getSheetByName(SHEETS.REQUESTS);
+  const memSheet = ss.getSheetByName(SHEETS.MEMBERS);
+  out.push('');
+  out.push('[시트 규모]');
+  out.push('  Requests: ' + (reqSheet ? reqSheet.getLastRow() + '행 × ' + reqSheet.getLastColumn() + '열' : '없음'));
+  out.push('  Members : ' + (memSheet ? memSheet.getLastRow() + '행 × ' + memSheet.getLastColumn() + '열' : '없음'));
+
+  if (reqSheet && reqSheet.getLastRow() >= 2) {
+    const lastRow = reqSheet.getLastRow();
+    const statuses = step('상태 열 전체 읽기', () => reqSheet.getRange(2, 3, lastRow - 1, 1).getValues());
+    let pending = 0;
+    const pendingRowNums = [];
+    (statuses || []).forEach((r, i) => {
+      if (String(r[0] || '').trim() === 'REQUESTED') { pending++; pendingRowNums.push(i + 2); }
+    });
+    out.push('  대기(REQUESTED) 건수: ' + pending + ' / 전체 ' + (lastRow - 1) + '행');
+
+    if (pending) {
+      // payload 열(9번)만 읽어 크기를 잰다. 여기가 크면 목록 전체가 느려진다.
+      const payloads = step('payload 열 읽기', () => reqSheet.getRange(2, 9, lastRow - 1, 1).getValues());
+      let total = 0, max = 0, heavy = 0;
+      pendingRowNums.forEach((rn) => {
+        const len = String((payloads[rn - 2] || [''])[0] || '').length;
+        total += len;
+        if (len > max) max = len;
+        if (len > 100000) heavy++;
+      });
+      out.push('');
+      out.push('[대기 요청 payload 크기]');
+      out.push('  합계    : ' + Math.round(total / 1024) + ' KB');
+      out.push('  최대 1건: ' + Math.round(max / 1024) + ' KB');
+      out.push('  100KB 초과 건수: ' + heavy + (heavy ? '  ← compactPendingRequestPayloads() 실행 권장' : ''));
+    }
+  }
+
+  out.push('');
+  out.push('[전체 호출 (캐시 없이)]');
+  try { CacheService.getScriptCache().remove(PENDING_REQUESTS_CACHE_KEY); } catch (e) {}
+  const list = step('getPendingRequests() 콜드', () => getPendingRequests());
+  const text = JSON.stringify(list || []);
+  out.push('  결과 건수: ' + (list ? list.length : 0));
+  out.push('  응답 크기: ' + Math.round(text.length / 1024) + ' KB'
+    + (text.length >= 95000 ? '  ← 95KB 초과라 서버 캐시가 안 됩니다' : '  (캐시 가능)'));
+  step('getPendingRequests() 캐시 적중', () => getPendingRequests());
+
+  const report = out.join('\n');
+  Logger.log(report);
+  return report;
 }
 
 function processAdminAction(reqId, action, adminEmail) {

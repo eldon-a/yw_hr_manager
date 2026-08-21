@@ -652,6 +652,8 @@ function AdminDashboard({ user, headers, onHeaders, initialRequests, setBusy, se
   const seeded = Array.isArray(initialRequests);
   const [requests, setRequests] = useState(seeded ? initialRequests : []);
   const [loaded, setLoaded] = useState(seeded);
+  // 목록 로딩은 화면 전체를 막지 않고 목록 영역에서만 표시한다.
+  const [listLoading, setListLoading] = useState(!seeded);
   const [detail, setDetail] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [auditMode, setAuditMode] = useState('PERIOD');
@@ -659,10 +661,10 @@ function AdminDashboard({ user, headers, onHeaders, initialRequests, setBusy, se
   const [exportOpen, setExportOpen] = useState(false);
 
   async function loadRequests() {
-    setBusy(true, '승인 대기 목록을 불러오는 중입니다');
+    setListLoading(true);
     try { setRequests(await api.pendingRequests() || []); setLoaded(true); setNotice(null); }
     catch (error) { setNotice({ type: 'error', text: errorText(error) }); }
-    finally { setBusy(false); }
+    finally { setListLoading(false); }
   }
   // 로그인 응답에 목록이 실려 왔으면 같은 데이터를 다시 요청하지 않는다.
   useEffect(() => {
@@ -722,10 +724,13 @@ function AdminDashboard({ user, headers, onHeaders, initialRequests, setBusy, se
   return (
     <div className="admin-layout">
       <section>
-        <div className="section-head"><div><h2>승인 대기</h2><p>최근 요청부터 표시됩니다.</p></div><button type="button" className="button ghost compact" onClick={loadRequests}>새로고침</button></div>
+        <div className="section-head"><div><h2>승인 대기</h2><p>{listLoading ? '목록을 불러오는 중입니다…' : '최근 요청부터 표시됩니다.'}</p></div><button type="button" className="button ghost compact" onClick={loadRequests} disabled={listLoading}>{listLoading ? '불러오는 중' : '새로고침'}</button></div>
         <div className="request-list">
+          {listLoading && !requests.length && (
+            <><div className="skeleton skeleton-card" /><div className="skeleton skeleton-card short" /></>
+          )}
           {requests.map((item) => <RequestCard key={item.request_id} item={item} onDetail={() => setDetail(item)} onDecision={(decision) => setConfirm({ item, decision })} />)}
-          {loaded && !requests.length && <EmptyState title="대기 중인 요청이 없습니다" description="새 요청이 접수되면 이곳에 표시됩니다." />}
+          {loaded && !listLoading && !requests.length && <EmptyState title="대기 중인 요청이 없습니다" description="새 요청이 접수되면 이곳에 표시됩니다." />}
         </div>
       </section>
       <aside className="admin-stack">
