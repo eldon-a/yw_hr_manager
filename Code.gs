@@ -5,7 +5,7 @@ const SHEETS = {
   MEMBERS: 'Members',
   SPECIAL_MEMBERS: 'special_members',
   REQUESTS: 'Requests',
-  ARCHIVE: 'WithdrawArchive',
+  ARCHIVE: 'WithdrawnArchive',
   DEPTHEADS: 'DeptHeads',
   ADMINS: 'Admins',
   DEPARTMENTS: 'Departments',
@@ -16,6 +16,10 @@ const SHEETS = {
   DEPT_STATUS_LINKS: '부서별 현황 공유 링크',
   RANK_STATUS_LINKS: '법계별 현황 공유 링크'
 };
+
+// 탈퇴 아카이브 시트 이름. 과거 버전이 만든 'WithdrawArchive' 시트도 계속 인식한다.
+// (이름이 갈려서 보관 기록이 두 시트로 흩어지는 것을 막는다)
+const ARCHIVE_SHEET_NAMES = ['WithdrawnArchive', 'WithdrawArchive'];
 
 const DEPT_STATUS_FOLDER_NAME = '부서별 현황';
 const RANK_STATUS_FOLDER_NAME = '법계별 현황';
@@ -559,28 +563,31 @@ function getMaxMemberId_(memSheet, map) {
 }
 
 // 탈퇴 회원이 Members 시트에서 제거되어도 회원번호가 재사용되지 않도록,
-// WithdrawArchive 시트에 보관된 과거 회원번호의 최댓값을 함께 반영한다.
+// 탈퇴 아카이브 시트(이름 후보 전체)에 보관된 과거 회원번호의 최댓값을 함께 반영한다.
 function getArchivedMaxMemberId_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const archiveSheet = ss.getSheetByName(SHEETS.ARCHIVE) || ss.getSheetByName('WithdrawnArchive');
-  if (!archiveSheet) return 0;
-  const lastRow = archiveSheet.getLastRow();
-  const lastCol = archiveSheet.getLastColumn();
-  if (lastRow < 2 || lastCol < 1) return 0;
-
-  const headers = archiveSheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  const idCols = [];
-  headers.forEach((h, i) => {
-    if (h === 'member_id' || h === `M_${COLS.ID}`) idCols.push(i + 1);
-  });
-  if (!idCols.length) return 0;
-
+  const sheets = getWithdrawArchiveSheets_();
   let max = 0;
-  for (let i = 0; i < idCols.length; i++) {
-    const vals = archiveSheet.getRange(2, idCols[i], lastRow - 1, 1).getDisplayValues();
-    for (let j = 0; j < vals.length; j++) {
-      const num = parseMemberIdNumber_(vals[j][0]);
-      if (num > max) max = num;
+  for (let s = 0; s < sheets.length; s++) {
+    const archiveSheet = sheets[s];
+    const lastRow = archiveSheet.getLastRow();
+    const lastCol = archiveSheet.getLastColumn();
+    if (lastRow < 2 || lastCol < 1) continue;
+
+    const headers = archiveSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const idCols = [];
+    headers.forEach((h, i) => {
+      const name = String(h || '').trim();
+      // member_id / M_회원번호 외에, Members 헤더를 그대로 복사해 만든 과거 시트의 '회원번호'도 본다.
+      if (name === 'member_id' || name === `M_${COLS.ID}` || name === COLS.ID) idCols.push(i + 1);
+    });
+    if (!idCols.length) continue;
+
+    for (let i = 0; i < idCols.length; i++) {
+      const vals = archiveSheet.getRange(2, idCols[i], lastRow - 1, 1).getDisplayValues();
+      for (let j = 0; j < vals.length; j++) {
+        const num = parseMemberIdNumber_(vals[j][0]);
+        if (num > max) max = num;
+      }
     }
   }
   return max;
@@ -663,12 +670,34 @@ function bumpSearchCacheVersion_() {
   CacheService.getScriptCache().put('MEM_SEARCH_VER', String(Date.now()), CACHE_TTL);
 }
 
-function getWithdrawArchiveSheet_() {
+// 존재하는 탈퇴 아카이브 시트를 이름 후보 순서대로 모아 준다.
+function getWithdrawArchiveSheets_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(SHEETS.ARCHIVE);
-  if (!sheet) sheet = ss.getSheetByName('WithdrawnArchive');
-  if (!sheet) sheet = ss.insertSheet(SHEETS.ARCHIVE);
-  return sheet;
+  const sheets = [];
+  ARCHIVE_SHEET_NAMES.forEach(name => {
+    const sheet = ss.getSheetByName(name);
+    if (sheet) sheets.push(sheet);
+  });
+  return sheets;
+}
+
+function getWithdrawArchiveSheet_() {
+  const sheets = getWithdrawArchiveSheets_();
+  // 이미 기록이 쌓여 있는 시트를 우선 사용한다. 빈 시트가 새로 생겨도 보관 기록이 흩어지지 않는다.
+  for (let i = 0; i < sheets.length; i++) {
+    if (sheets[i].getLastRow() > 1) return sheets[i];
+  }
+  if (sheets.length) return sheets[0];
+  return SpreadsheetApp.getActiveSpreadsheet().insertSheet(SHEETS.ARCHIVE);
+}
+
+// getRange() 는 시트 격자(행/열) 밖을 지정하면 예외를 던진다.
+// 아카이브는 Members + MemberHistory 헤더를 모두 붙이므로 기본 26열을 쉽게 넘는다 → 쓰기 전에 확장한다.
+function ensureSheetGrid_(sheet, rowsNeeded, colsNeeded) {
+  const maxRows = sheet.getMaxRows();
+  if (rowsNeeded > maxRows) sheet.insertRowsAfter(maxRows, rowsNeeded - maxRows);
+  const maxCols = sheet.getMaxColumns();
+  if (colsNeeded > maxCols) sheet.insertColumnsAfter(maxCols, colsNeeded - maxCols);
 }
 
 function buildArchiveHeaders_(memberHeaders, historyHeaders) {
@@ -684,12 +713,14 @@ function ensureWithdrawArchiveHeaders_(sheet, memberHeaders, historyHeaders) {
   const existing = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
   const hasAnyHeader = existing.some(h => h !== "");
   if (!hasAnyHeader) {
+    ensureSheetGrid_(sheet, 1, required.length);
     sheet.getRange(1, 1, 1, required.length).setValues([required]);
     return required;
   }
   const updated = existing.slice();
   required.forEach(h => { if (updated.indexOf(h) === -1) updated.push(h); });
   if (updated.length !== existing.length) {
+    ensureSheetGrid_(sheet, 1, updated.length);
     sheet.getRange(1, 1, 1, updated.length).setValues([updated]);
   }
   return updated;
@@ -760,10 +791,12 @@ function archiveWithdrawnMember_(memberId, memberRowVals, memberMap, nowStr) {
   memberRow[headerIdx['record_type']] = 'MEMBER';
   baseFill(memberRow);
   memberHeaders.forEach(h => {
+    if (memberMap[h] === undefined) return;
+    const val = memberRowVals[memberMap[h]];
     const key = `M_${h}`;
-    if (headerIdx[key] !== undefined && memberMap[h] !== undefined) {
-      memberRow[headerIdx[key]] = memberRowVals[memberMap[h]];
-    }
+    if (headerIdx[key] !== undefined) memberRow[headerIdx[key]] = val;
+    // 과거 버전이 Members 헤더를 그대로 복사해 만든 시트라면 그 열에도 같이 채워 준다.
+    if (headerIdx[h] !== undefined) memberRow[headerIdx[h]] = val;
   });
   const archiveRows = [memberRow];
 
@@ -787,9 +820,14 @@ function archiveWithdrawnMember_(memberId, memberRowVals, memberMap, nowStr) {
     }
   }
 
+  const startRow = archiveSheet.getLastRow() + 1;
+  ensureSheetGrid_(archiveSheet, startRow + archiveRows.length - 1, headers.length);
   archiveSheet
-    .getRange(archiveSheet.getLastRow() + 1, 1, archiveRows.length, headers.length)
+    .getRange(startRow, 1, archiveRows.length, headers.length)
     .setValues(archiveRows);
+  // 보관이 끝난 것을 확인한 뒤에 Members 행을 지우도록 즉시 반영한다.
+  SpreadsheetApp.flush();
+  return archiveRows.length;
 }
 
 function updateAllAges() {
@@ -815,49 +853,71 @@ function moveNonActiveMembersToWithdrawnArchive() {
   const memSheet = ss.getSheetByName(SHEETS.MEMBERS);
   if (!memSheet) throw new Error("Members 시트를 찾을 수 없습니다.");
 
-  let archiveSheet = ss.getSheetByName('WithdrawnArchive');
-  if (!archiveSheet) archiveSheet = ss.insertSheet('WithdrawnArchive');
-
   const data = memSheet.getDataRange().getValues();
   if (data.length < 2) return "이동 대상 없음";
 
-  const headers = data[0];
   const map = getColumnMap(memSheet);
   const statusIdx = map[COLS.STATUS] !== undefined ? map[COLS.STATUS] : 14; // O열 기본
-
-  const archiveHeaders = archiveSheet.getLastColumn() > 0
-    ? archiveSheet.getRange(1, 1, 1, archiveSheet.getLastColumn()).getValues()[0]
-    : [];
-  const hasArchiveHeader = archiveHeaders.some(h => h !== "");
-  if (!hasArchiveHeader) {
-    archiveSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  }
+  const idIdx = map[COLS.ID];
+  const nowStr = nowDateTimeStr();
 
   const allowed = { '활동': true, '명예': true, '명목': true, '자격정지': true };
-  const rowsToArchive = [];
-  const rowsToDelete = [];
-
+  const targets = [];
   for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    const status = row[statusIdx];
-    if (!allowed[String(status || '')]) {
-      rowsToArchive.push(row);
-      rowsToDelete.push(i + 1); // 시트 기준(1-based)
-    }
+    const status = data[i][statusIdx];
+    if (!allowed[String(status || '')]) targets.push({ row: data[i], sheetRow: i + 1 }); // 시트 기준(1-based)
   }
+  if (targets.length === 0) return "이동 대상 없음";
 
-  if (rowsToArchive.length === 0) return "이동 대상 없음";
+  // 탈퇴 승인 경로와 같은 함수/스키마로 보관해야 아카이브 시트 형식이 갈라지지 않는다.
+  const movedRows = [];
+  const failed = [];
+  targets.forEach(t => {
+    const mid = idIdx !== undefined ? normalize(t.row[idIdx], true) : '';
+    try {
+      if (!archiveWithdrawnMember_(mid, t.row, map, nowStr)) throw new Error("보관 0건");
+      movedRows.push(t.sheetRow);
+    } catch (e) {
+      failed.push(`${mid || (t.sheetRow + '행')}: ${e && e.message ? e.message : e}`);
+    }
+  });
 
-  archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, rowsToArchive.length, rowsToArchive[0].length)
-    .setValues(rowsToArchive);
-
-  // 아래에서 위로 삭제해야 행 번호가 유지됨
-  for (let i = rowsToDelete.length - 1; i >= 0; i--) {
-    memSheet.deleteRow(rowsToDelete[i]);
+  // 아래에서 위로 삭제해야 행 번호가 유지됨 (보관 성공한 행만 삭제)
+  for (let i = movedRows.length - 1; i >= 0; i--) {
+    memSheet.deleteRow(movedRows[i]);
   }
   bumpSearchCacheVersion_();
 
-  return `이동 완료: ${rowsToArchive.length}명`;
+  if (failed.length) return `이동 완료: ${movedRows.length}명 / 보관 실패 ${failed.length}건 - ${failed.join(' | ')}`;
+  return `이동 완료: ${movedRows.length}명`;
+}
+
+// 아카이브 점검용. 스크립트 편집기에서 직접 실행하면 어느 시트에 어떻게 쌓이는지 확인할 수 있다.
+function diagnoseWithdrawArchive() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheets = getWithdrawArchiveSheets_();
+  const lines = ['아카이브 시트 후보: ' + ARCHIVE_SHEET_NAMES.join(', ')];
+  if (!sheets.length) {
+    lines.push(`  - 존재하는 아카이브 시트 없음 (다음 탈퇴 승인 시 '${SHEETS.ARCHIVE}' 자동 생성)`);
+  }
+  sheets.forEach(s => {
+    lines.push(`  - ${s.getName()}: 데이터 ${Math.max(0, s.getLastRow() - 1)}행 / 헤더 ${s.getLastColumn()}열`
+      + ` / 격자 ${s.getMaxRows()}행x${s.getMaxColumns()}열`);
+  });
+  lines.push('실제 기록 대상 시트: ' + getWithdrawArchiveSheet_().getName());
+
+  const memberHeaders = getMemberHeaders();
+  const hSheet = ss.getSheetByName(SHEETS.HISTORY);
+  const historyHeaders = (hSheet && hSheet.getLastColumn() > 0)
+    ? hSheet.getRange(1, 1, 1, hSheet.getLastColumn()).getValues()[0].filter(h => h !== "")
+    : [];
+  const required = buildArchiveHeaders_(memberHeaders, historyHeaders);
+  lines.push(`필요 열 수: ${required.length} (기본 4 + Members ${memberHeaders.length} + History ${historyHeaders.length})`);
+  lines.push('보관된 최대 회원번호: ' + getArchivedMaxMemberId_());
+
+  const report = lines.join('\n');
+  Logger.log(report);
+  return report;
 }
 
 /****************************************************************
@@ -1681,9 +1741,17 @@ function processAdminAction(reqId, action, adminEmail) {
       const finalCols = memSheet.getLastColumn();
       while (rowVals.length < finalCols) rowVals.push('');
       if (type === 'WITHDRAW') {
-        // 탈퇴 승인: WithdrawArchive 마지막 행에 보관 후 Members 시트에서 행을 제거한다.
+        // 탈퇴 승인: 아카이브 시트에 보관이 끝난 것을 확인한 뒤에만 Members 행을 제거한다.
         // (회원번호는 reserveMemberIds_ 의 저장 max 값으로 관리되므로 재사용되지 않는다)
-        archiveWithdrawnMember_(mid, rowVals, map, nowStr);
+        let archivedCount = 0;
+        try {
+          archivedCount = archiveWithdrawnMember_(mid, rowVals, map, nowStr);
+        } catch (archiveErr) {
+          throw new Error(`탈퇴 보관(${SHEETS.ARCHIVE})에 실패해 승인을 중단했습니다: ${archiveErr && archiveErr.message ? archiveErr.message : archiveErr}`);
+        }
+        if (!archivedCount) {
+          throw new Error(`탈퇴 보관(${SHEETS.ARCHIVE})에 실패해 승인을 중단했습니다. (보관 0건)`);
+        }
         memSheet.deleteRow(rIdx);
       } else {
         const finalRange = memSheet.getRange(rIdx, 1, 1, finalCols);
