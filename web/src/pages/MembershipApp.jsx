@@ -48,6 +48,7 @@ export default function MembershipApp() {
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState('처리하고 있습니다');
   const [notice, setNotice] = useState(null);
+  const [pendingSeed, setPendingSeed] = useState(null);
 
   useEffect(() => {
     const prefetch = () => api.departments().then(setDepartments).catch(() => {});
@@ -162,6 +163,9 @@ export default function MembershipApp() {
       const login = await withBusy('담당자 권한을 확인하고 있습니다', () => api.staffLogin(credentials.email, credentials.password));
       setUser(login);
       setDepartments(login.departments || []);
+      // 관리자 로그인 응답에 승인 대기 목록이 함께 오면 그대로 쓰고 추가 요청을 보내지 않는다.
+      setPendingSeed(Array.isArray(login.pendingRequests) ? login.pendingRequests : null);
+      if (Array.isArray(login.memberHeaders)) setHeaders(login.memberHeaders);
       setScreen('staffHome');
       ensureHeaders().catch(() => {});
     } catch (_) { /* notice already set */ }
@@ -227,6 +231,7 @@ export default function MembershipApp() {
           user={user}
           headers={headers}
           onHeaders={ensureHeaders}
+          initialRequests={pendingSeed}
           onAction={openStaffSearch}
           onNew={async () => {
             try {
@@ -474,7 +479,7 @@ function NewMemberForm({ departments, user, consentOptional, onBack, onSubmit })
   );
 }
 
-function StaffHome({ user, headers, onHeaders, onAction, onNew, onLogout, setBusy, setNotice }) {
+function StaffHome({ user, headers, onHeaders, initialRequests, onAction, onNew, onLogout, setBusy, setNotice }) {
   return (
     <>
       <div className="staff-bar"><div><strong>{user.userName}님</strong> <StatusBadge tone={user.role === 'ADMIN' ? 'success' : 'info'}>{user.role === 'ADMIN' ? '관리자' : '부서 담당자'}</StatusBadge><br /><span>{user.email}</span></div><button type="button" className="button ghost compact" onClick={onLogout}>로그아웃</button></div>
@@ -485,7 +490,7 @@ function StaffHome({ user, headers, onHeaders, onAction, onNew, onLogout, setBus
         <button className="staff-action danger" onClick={() => onAction('WITHDRAW')}>탈퇴 신청<small>사유를 기록해 승인 요청</small></button>
         <button className="staff-action" onClick={onNew}>신규 회원 대리<small>담당자가 가입 신청 접수</small></button>
       </div>
-      {user.role === 'ADMIN' && <AdminDashboard user={user} headers={headers} onHeaders={onHeaders} setBusy={setBusy} setNotice={setNotice} />}
+      {user.role === 'ADMIN' && <AdminDashboard user={user} headers={headers} onHeaders={onHeaders} initialRequests={initialRequests} setBusy={setBusy} setNotice={setNotice} />}
     </>
   );
 }
@@ -643,9 +648,10 @@ function MemberRequestForm({ member, type, user, departments, headers, onBack, o
   );
 }
 
-function AdminDashboard({ user, headers, onHeaders, setBusy, setNotice }) {
-  const [requests, setRequests] = useState([]);
-  const [loaded, setLoaded] = useState(false);
+function AdminDashboard({ user, headers, onHeaders, initialRequests, setBusy, setNotice }) {
+  const seeded = Array.isArray(initialRequests);
+  const [requests, setRequests] = useState(seeded ? initialRequests : []);
+  const [loaded, setLoaded] = useState(seeded);
   const [detail, setDetail] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [auditMode, setAuditMode] = useState('PERIOD');
@@ -658,7 +664,11 @@ function AdminDashboard({ user, headers, onHeaders, setBusy, setNotice }) {
     catch (error) { setNotice({ type: 'error', text: errorText(error) }); }
     finally { setBusy(false); }
   }
-  useEffect(() => { loadRequests(); onHeaders().catch(() => {}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // 로그인 응답에 목록이 실려 왔으면 같은 데이터를 다시 요청하지 않는다.
+  useEffect(() => {
+    if (!seeded) loadRequests();
+    onHeaders().catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function processRequest() {
     if (!confirm) return;

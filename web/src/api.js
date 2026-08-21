@@ -149,6 +149,9 @@ export const api = {
     clearStaffSession();
     const result = await callApi('checkAuthAndLoadData', { email, password });
     writeStaffSession(result);
+    // 로그인 응답에 함께 온 기준정보를 캐시에 심어 두면 뒤따르는 조회가 왕복 없이 끝난다.
+    if (Array.isArray(result.memberHeaders)) cacheWrite('hrm.headers.v2', result.memberHeaders);
+    if (Array.isArray(result.departments)) cacheWrite('hrm.departments.v2', result.departments);
     return result;
   },
   selfCandidates: (name, memberId, departmentName) => callApi('findSelfMemberCandidates', { name, memberId, departmentName }),

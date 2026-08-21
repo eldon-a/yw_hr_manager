@@ -40,6 +40,8 @@ const SEARCH_CACHE_TTL = 120;
 const API_SESSION_TTL_SECONDS = 21600;
 const API_SESSION_SECRET_PROP = 'HRM_API_SESSION_SECRET_V1';
 const TZ_CHECKED_PROP = 'HRM_TZ_CHECKED_V2';
+// 흩어진 행을 개별로 읽는 구간이 이보다 많아지면 시트 전체를 한 번에 읽는 편이 빠르다.
+const SHEET_ROW_FETCH_MAX_GROUPS = 40;
 const PENDING_REQUESTS_CACHE_KEY = 'PENDING_REQUESTS_V3';
 const PENDING_REQUESTS_CACHE_SECONDS = 30;
 const APP_TIMEZONE = 'Asia/Seoul';
@@ -108,7 +110,7 @@ function handleApiAction_(action, payload) {
         result = searchMembers(payload.keyword);
         break;
       case 'checkAuthAndLoadData':
-        result = issueApiSession_(checkAuthAndLoadData(payload.email, payload.password));
+        result = attachAdminBootstrap_(issueApiSession_(checkAuthAndLoadData(payload.email, payload.password)));
         break;
       case 'verifyMemberLogin':
         result = verifyMemberLogin(payload.name, payload.memberId, payload.departmentName);
@@ -200,6 +202,19 @@ function apiJson_(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * 관리자는 로그인 직후 반드시 승인 대기 목록과 회원 헤더를 다시 불러온다.
+ * Apps Script는 아무 일도 하지 않는 호출조차 왕복 1.5~3초가 들기 때문에,
+ * 로그인 응답에 함께 실어 보내 왕복 2회를 줄인다.
+ * 여기서 실패해도 로그인 자체는 막지 않는다(프런트가 개별 호출로 되돌아간다).
+ */
+function attachAdminBootstrap_(login) {
+  if (!login || login.role !== 'ADMIN') return login;
+  try { login.pendingRequests = getPendingRequests(); } catch (e) { login.pendingRequests = null; }
+  try { login.memberHeaders = getMemberHeaders(); } catch (e) { login.memberHeaders = null; }
+  return login;
 }
 
 /** 프런트에 전달할 오류 코드를 함께 담은 Error를 만든다. */
@@ -1676,6 +1691,39 @@ function cachePendingRequestsResult_(list) {
   return list;
 }
 
+/**
+ * 지정한 행 번호의 값만 읽어 { 행번호: 값배열 } 로 돌려준다.
+ * 연속된 행은 한 번에 묶어 읽고, 흩어진 구간이 너무 많아 오히려 손해일 때는
+ * 전체를 한 번에 읽는 쪽으로 되돌아간다.
+ */
+function readSheetRowsByNumber_(sheet, rowNumbers, lastRow, lastCol) {
+  const out = {};
+  if (!rowNumbers || !rowNumbers.length) return out;
+
+  const groups = [];
+  let start = rowNumbers[0];
+  let prev = rowNumbers[0];
+  for (let i = 1; i < rowNumbers.length; i++) {
+    if (rowNumbers[i] === prev + 1) { prev = rowNumbers[i]; continue; }
+    groups.push({ start: start, count: prev - start + 1 });
+    start = rowNumbers[i];
+    prev = rowNumbers[i];
+  }
+  groups.push({ start: start, count: prev - start + 1 });
+
+  if (groups.length > SHEET_ROW_FETCH_MAX_GROUPS) {
+    const all = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    for (let i = 0; i < rowNumbers.length; i++) out[rowNumbers[i]] = all[rowNumbers[i] - 2];
+    return out;
+  }
+
+  for (let g = 0; g < groups.length; g++) {
+    const values = sheet.getRange(groups[g].start, 1, groups[g].count, lastCol).getValues();
+    for (let i = 0; i < values.length; i++) out[groups[g].start + i] = values[i];
+  }
+  return out;
+}
+
 function getPendingRequests() {
   const apiCache = CacheService.getScriptCache();
   const cached = apiCache.get(PENDING_REQUESTS_CACHE_KEY);
@@ -1717,19 +1765,26 @@ function getPendingRequests() {
   const needMemberInfo = Object.keys(pendingMemberIds).length > 0;
   if (needMemberInfo) {
     const memSheet = ss.getSheetByName(SHEETS.MEMBERS);
-    if (memSheet) {
-      // 회원마다 TextFinder/getRange를 반복하지 않고 Members 시트를 한 번에 읽는다.
-      // 대기 요청이 몇 건이든 Spreadsheet I/O는 한 번으로 고정된다.
-      const mVals = memSheet.getDataRange().getValues();
-      const memberHeaders = mVals.length ? mVals[0] : [];
-      memberHeaders.forEach((header, idx) => {
+    const memLastRow = memSheet ? memSheet.getLastRow() : 0;
+    const memLastCol = memSheet ? memSheet.getLastColumn() : 0;
+    if (memSheet && memLastRow >= 2 && memLastCol >= 1) {
+      memSheet.getRange(1, 1, 1, memLastCol).getValues()[0].forEach((header, idx) => {
         if (header) memberMap[String(header).trim()] = idx;
       });
-      if (memberMap[COLS.ID] !== undefined) {
-        for (let i = 1; i < mVals.length; i++) {
-          const r = mVals[i];
-          const key = normalize(r[memberMap[COLS.ID]], true);
-          if (!pendingMemberIds[key]) continue;
+      const idIdx = memberMap[COLS.ID];
+      if (idIdx !== undefined) {
+        // 승인 대기 회원은 보통 몇 명뿐이다. 회원번호 열만 먼저 읽어 대상 행을 찾고
+        // 그 행만 가져오면 시트 전체를 읽을 때보다 훨씬 적은 셀만 전송된다.
+        const idValues = memSheet.getRange(2, idIdx + 1, memLastRow - 1, 1).getValues();
+        const wantedRows = [];
+        for (let i = 0; i < idValues.length; i++) {
+          if (pendingMemberIds[normalize(idValues[i][0], true)]) wantedRows.push(i + 2);
+        }
+        const rowsByNumber = readSheetRowsByNumber_(memSheet, wantedRows, memLastRow, memLastCol);
+        for (let i = 0; i < wantedRows.length; i++) {
+          const r = rowsByNumber[wantedRows[i]];
+          if (!r) continue;
+          const key = normalize(r[idIdx], true);
           const dId = memberMap[COLS.DEPT_ID] !== undefined ? String(r[memberMap[COLS.DEPT_ID]] || '').trim() : '';
           const birthValue = memberMap[COLS.BIRTH] !== undefined ? r[memberMap[COLS.BIRTH]] : '';
           memInfo[key] = {
