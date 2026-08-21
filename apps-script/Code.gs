@@ -36,6 +36,10 @@ const MEMBER_CARD_PDF_JOB_PREFIX = '회원카드_JOB_';
 const MEMBER_CARD_PDF_BATCH_SIZE = 20;
 const CACHE_TTL = 21600;
 const SEARCH_CACHE_TTL = 120;
+// 관리자 세션은 서명 토큰이라 서버에 저장하지 않는다. 유효기간만 토큰 안에 넣는다.
+const API_SESSION_TTL_SECONDS = 21600;
+const API_SESSION_SECRET_PROP = 'HRM_API_SESSION_SECRET_V1';
+const TZ_CHECKED_PROP = 'HRM_TZ_CHECKED_V2';
 const PENDING_REQUESTS_CACHE_KEY = 'PENDING_REQUESTS_V3';
 const PENDING_REQUESTS_CACHE_SECONDS = 30;
 const APP_TIMEZONE = 'Asia/Seoul';
@@ -186,7 +190,7 @@ function handleApiAction_(action, payload) {
     console.error('API ' + action + ' failed: ' + (error && error.stack ? error.stack : error));
     return apiJson_({
       ok: false,
-      error: 'server_error',
+      error: (error && error.apiErrorCode) || 'server_error',
       message: error && error.message ? error.message : String(error)
     });
   }
@@ -198,41 +202,122 @@ function apiJson_(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-/** 관리자 API는 UI 로그인 결과로 발급한 단기 세션이 있어야 실행된다. */
+/** 프런트에 전달할 오류 코드를 함께 담은 Error를 만든다. */
+function apiError_(message, code) {
+  const error = new Error(message);
+  error.apiErrorCode = code;
+  return error;
+}
+
+/**
+ * 세션 서명키. ScriptProperties에 한 번만 만들어 두고 계속 재사용한다.
+ * CacheService와 달리 삭제되지 않으므로 발급한 토큰이 임의로 무효화되지 않는다.
+ */
+function getApiSessionSecret_() {
+  const props = PropertiesService.getScriptProperties();
+  let secret = props.getProperty(API_SESSION_SECRET_PROP);
+  if (secret) return secret;
+
+  const lock = LockService.getScriptLock();
+  let locked = false;
+  try { locked = lock.tryLock(5000); } catch (e) { locked = false; }
+  try {
+    secret = props.getProperty(API_SESSION_SECRET_PROP);
+    if (!secret) {
+      secret = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+      props.setProperty(API_SESSION_SECRET_PROP, secret);
+    }
+  } finally {
+    if (locked) { try { lock.releaseLock(); } catch (e) {} }
+  }
+  return secret;
+}
+
+function signApiSessionPayload_(encodedPayload) {
+  const bytes = Utilities.computeHmacSha256Signature(encodedPayload, getApiSessionSecret_());
+  return Utilities.base64EncodeWebSafe(bytes);
+}
+
+/** 길이가 같아도 앞부분만 비교하고 끝내지 않도록 전체를 훑는다. */
+function timingSafeEquals_(a, b) {
+  const left = String(a || '');
+  const right = String(b || '');
+  if (left.length !== right.length) return false;
+  let diff = 0;
+  for (let i = 0; i < left.length; i++) diff |= left.charCodeAt(i) ^ right.charCodeAt(i);
+  return diff === 0;
+}
+
+/**
+ * 관리자 API는 UI 로그인 결과로 발급한 서명 토큰이 있어야 실행된다.
+ * 토큰 형식: base64url(payload JSON) + '.' + base64url(HMAC-SHA256)
+ * 서버에 아무것도 저장하지 않으므로 캐시가 비워져도 세션이 끊기지 않는다.
+ */
 function issueApiSession_(login) {
-  const token = Utilities.getUuid().replace(/-/g, '');
-  const session = {
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const payload = {
     role: login.role,
     email: login.email,
     userName: login.userName,
-    issuedAt: new Date().toISOString()
+    iat: issuedAt,
+    exp: issuedAt + API_SESSION_TTL_SECONDS
   };
-  CacheService.getScriptCache().put('HRM_API_SESSION:' + token, JSON.stringify(session), CACHE_TTL);
-  login.apiToken = token;
+  const encoded = Utilities.base64EncodeWebSafe(JSON.stringify(payload), Utilities.Charset.UTF_8);
+  login.apiToken = encoded + '.' + signApiSessionPayload_(encoded);
+  login.apiTokenExpiresAt = new Date(payload.exp * 1000).toISOString();
   return login;
+}
+
+function parseSignedApiSession_(token) {
+  const dot = token.indexOf('.');
+  if (dot <= 0 || dot === token.length - 1) return null;
+  const encoded = token.slice(0, dot);
+  const signature = token.slice(dot + 1);
+  if (!timingSafeEquals_(signature, signApiSessionPayload_(encoded))) return null;
+  try {
+    const json = Utilities.newBlob(Utilities.base64DecodeWebSafe(encoded)).getDataAsString('UTF-8');
+    return JSON.parse(json);
+  } catch (e) {
+    return null;
+  }
+}
+
+/** 이번 배포 이전에 발급된 캐시 기반 토큰도 만료 전까지는 그대로 인정한다. */
+function parseLegacyApiSession_(token) {
+  if (token.indexOf('.') !== -1) return null;
+  let raw = null;
+  try { raw = CacheService.getScriptCache().get('HRM_API_SESSION:' + token); } catch (e) { return null; }
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (e) { return null; }
 }
 
 function requireApiSession_(token, adminOnly) {
   const safeToken = String(token || '').trim();
-  if (!safeToken) throw new Error('로그인이 필요합니다. 다시 로그인해 주세요.');
-  const raw = CacheService.getScriptCache().get('HRM_API_SESSION:' + safeToken);
-  if (!raw) throw new Error('로그인 시간이 만료되었습니다. 다시 로그인해 주세요.');
-  let session;
-  try { session = JSON.parse(raw); } catch (e) { throw new Error('로그인 정보를 확인할 수 없습니다.'); }
-  if (adminOnly && session.role !== 'ADMIN') throw new Error('관리자 권한이 필요합니다.');
+  if (!safeToken) throw apiError_('로그인이 필요합니다. 다시 로그인해 주세요.', 'auth_required');
+
+  const session = parseSignedApiSession_(safeToken) || parseLegacyApiSession_(safeToken);
+  if (!session) throw apiError_('로그인 정보를 확인할 수 없습니다. 다시 로그인해 주세요.', 'auth_required');
+  if (session.exp && session.exp * 1000 <= Date.now()) {
+    throw apiError_('로그인 후 6시간이 지났습니다. 다시 로그인해 주세요.', 'session_expired');
+  }
+  if (adminOnly && session.role !== 'ADMIN') throw apiError_('관리자 권한이 필요합니다.', 'forbidden');
   return session;
 }
 
+/**
+ * 시간대 확인은 스프레드시트를 여는 비용이 크다.
+ * 캐시는 자주 비워져 매 요청마다 다시 열리므로 ScriptProperties에 기록한다.
+ */
 function ensureSpreadsheetTimezone_() {
-  const cache = CacheService.getScriptCache();
-  if (cache.get('TZ_CHECKED')) return;
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty(TZ_CHECKED_PROP) === APP_TIMEZONE) return;
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     if (ss.getSpreadsheetTimeZone() !== APP_TIMEZONE) {
       ss.setSpreadsheetTimeZone(APP_TIMEZONE);
     }
+    props.setProperty(TZ_CHECKED_PROP, APP_TIMEZONE);
   } catch (e) {}
-  cache.put('TZ_CHECKED', '1', CACHE_TTL);
 }
 
 /****************************************************************

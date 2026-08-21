@@ -1,6 +1,33 @@
 const API_URL = (import.meta.env.VITE_API_URL || '').trim();
 const inflight = new Map();
 
+const TOKEN_KEY = 'hrm.apiToken.v1';
+const PROFILE_KEY = 'hrm.staffProfile.v1';
+
+// Apps Script는 콜드 스타트에서 30초를 넘기는 경우가 있어 기본 대기 시간을 넉넉히 잡는다.
+const DEFAULT_TIMEOUT_MS = 45000;
+
+// 데이터를 바꾸지 않는 작업만 자동 재시도한다. 쓰기 작업은 중복 처리를 막기 위해 한 번만 보낸다.
+const SAFE_ACTIONS = new Set([
+  'ping',
+  'getDepartmentList',
+  'getMemberHeaders',
+  'searchMembers',
+  'checkAuthAndLoadData',
+  'verifyMemberLogin',
+  'findSelfMemberCandidates',
+  'getPendingRequests',
+  'getDetailedHistory',
+  'searchMembersForPhoto',
+  'getPhotoQueueStatus',
+  'getMemberCardFilterOptions',
+  'getMemberCardsData',
+]);
+
+// 서버가 정상 응답을 주지 못한 경우에만 재시도한다. 업무 오류(server_error)는 재시도하지 않는다.
+const RETRYABLE_CODES = new Set(['timeout', 'network', 'http_error', 'invalid_response']);
+const SESSION_LOST_CODES = new Set(['auth_required', 'session_expired']);
+
 class ApiError extends Error {
   constructor(message, code = 'api_error') {
     super(message);
@@ -21,17 +48,25 @@ function cacheWrite(key, value) {
   try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), value })); } catch (_) { /* quota */ }
 }
 
-export async function callApi(action, params = {}, options = {}) {
-  if (!API_URL) {
-    throw new ApiError('API 주소가 설정되지 않았습니다. web/.env.local의 VITE_API_URL을 확인해 주세요.', 'missing_url');
-  }
+function readToken() {
+  try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch (_) { return ''; }
+}
 
-  const timeoutMs = options.timeoutMs || 30000;
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function notifySessionLost(error) {
+  clearStaffSession();
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent('hrm:session-expired', { detail: { message: error.message } }));
+  } catch (_) { /* 구형 브라우저 */ }
+}
+
+async function requestOnce(action, params, timeoutMs) {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    let authToken = '';
-    try { authToken = sessionStorage.getItem('hrm.apiToken.v1') || ''; } catch (_) { /* private mode */ }
+    const authToken = readToken();
     const response = await fetch(API_URL, {
       method: 'POST',
       mode: 'cors',
@@ -59,6 +94,38 @@ export async function callApi(action, params = {}, options = {}) {
   }
 }
 
+export async function callApi(action, params = {}, options = {}) {
+  if (!API_URL) {
+    throw new ApiError('API 주소가 설정되지 않았습니다. web/.env.local의 VITE_API_URL을 확인해 주세요.', 'missing_url');
+  }
+
+  const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
+  const maxAttempts = options.retries != null
+    ? options.retries + 1
+    : (SAFE_ACTIONS.has(action) ? 3 : 1);
+  // 재시도까지 포함한 전체 대기 상한. 사용자가 무한정 기다리지 않도록 묶어 둔다.
+  const deadline = Date.now() + (options.totalBudgetMs || timeoutMs * 2);
+
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await requestOnce(action, params, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      if (SESSION_LOST_CODES.has(error.code)) {
+        notifySessionLost(error);
+        throw error;
+      }
+      const canRetry = attempt < maxAttempts
+        && RETRYABLE_CODES.has(error.code)
+        && Date.now() < deadline - 5000;
+      if (!canRetry) throw error;
+      await delay(attempt === 1 ? 600 : 1500);
+    }
+  }
+  throw lastError;
+}
+
 function cachedCall(cacheKey, ttl, action, params = {}) {
   const cached = cacheRead(cacheKey, ttl);
   if (cached !== null) return Promise.resolve(cached);
@@ -79,9 +146,9 @@ export const api = {
   memberCardFilters: () => cachedCall('hrm.cardFilters.v2', 15 * 60 * 1000, 'getMemberCardFilterOptions'),
   searchMembers: (keyword) => callApi('searchMembers', { keyword }),
   staffLogin: async (email, password) => {
-    try { sessionStorage.removeItem('hrm.apiToken.v1'); } catch (_) { /* private mode */ }
+    clearStaffSession();
     const result = await callApi('checkAuthAndLoadData', { email, password });
-    try { sessionStorage.setItem('hrm.apiToken.v1', result.apiToken || ''); } catch (_) { /* private mode */ }
+    writeStaffSession(result);
     return result;
   },
   selfCandidates: (name, memberId, departmentName) => callApi('findSelfMemberCandidates', { name, memberId, departmentName }),
@@ -101,8 +168,40 @@ export const api = {
   cardPdfBatch: (payload) => callApi('generateMemberCardsPdfBatch', payload, { timeoutMs: 120000 }),
 };
 
+/** 로그인 결과를 탭 세션에 보관해 새로고침해도 다시 로그인하지 않도록 한다. */
+function writeStaffSession(login) {
+  if (!login) return;
+  try {
+    sessionStorage.setItem(TOKEN_KEY, login.apiToken || '');
+    sessionStorage.setItem(PROFILE_KEY, JSON.stringify({
+      role: login.role,
+      email: login.email,
+      userName: login.userName,
+      departments: login.departments || [],
+      expiresAt: login.apiTokenExpiresAt || '',
+    }));
+  } catch (_) { /* private mode */ }
+}
+
+/** 새로고침 직후 복구할 수 있는 유효한 담당자 세션을 돌려준다. 없으면 null. */
+export function readStaffSession() {
+  const token = readToken();
+  if (!token) return null;
+  let profile;
+  try { profile = JSON.parse(sessionStorage.getItem(PROFILE_KEY) || 'null'); } catch (_) { return null; }
+  if (!profile || !profile.role || profile.role === 'NONE') return null;
+  if (profile.expiresAt && Date.parse(profile.expiresAt) <= Date.now()) {
+    clearStaffSession();
+    return null;
+  }
+  return profile;
+}
+
 export function clearStaffSession() {
-  try { sessionStorage.removeItem('hrm.apiToken.v1'); } catch (_) { /* ignore */ }
+  try {
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(PROFILE_KEY);
+  } catch (_) { /* ignore */ }
 }
 
 export function clearReferenceCache() {

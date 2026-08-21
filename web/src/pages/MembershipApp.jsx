@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { api, clearStaffSession } from '../api.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, clearStaffSession, readStaffSession } from '../api.js';
 import { driveThumbnail, fileToDataUrl, isAllowedImage, prepareMemberPhoto } from '../file-utils.js';
 import {
   BrandHeader,
@@ -32,9 +32,13 @@ function appHeader(user) {
 }
 
 export default function MembershipApp() {
-  const [screen, setScreen] = useState('home');
-  const [user, setUser] = useState(EMPTY_USER);
-  const [departments, setDepartments] = useState([]);
+  // 새로고침해도 탭에 남아 있는 담당자 세션을 그대로 이어서 사용한다.
+  const [restored] = useState(readStaffSession);
+  const [screen, setScreen] = useState(restored ? 'staffHome' : 'home');
+  const [user, setUser] = useState(restored
+    ? { role: restored.role, userName: restored.userName, email: restored.email }
+    : EMPTY_USER);
+  const [departments, setDepartments] = useState(restored?.departments || []);
   const [headers, setHeaders] = useState([]);
   const [selected, setSelected] = useState(null);
   const [memberCandidates, setMemberCandidates] = useState([]);
@@ -49,6 +53,22 @@ export default function MembershipApp() {
     const prefetch = () => api.departments().then(setDepartments).catch(() => {});
     const timer = window.requestIdleCallback ? window.requestIdleCallback(prefetch) : setTimeout(prefetch, 700);
     return () => window.cancelIdleCallback ? window.cancelIdleCallback(timer) : clearTimeout(timer);
+  }, []);
+
+  // 세션이 끊긴 뒤 같은 오류가 계속 뜨지 않도록 곧바로 로그인 화면으로 돌려보낸다.
+  const userRef = useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => {
+    const onSessionExpired = (event) => {
+      const role = userRef.current?.role;
+      if (role !== 'ADMIN' && role !== 'DEPT_HEAD') return;
+      setUser(EMPTY_USER);
+      setSelected(null);
+      setScreen('staffLogin');
+      setNotice({ type: 'warning', text: event.detail?.message || '로그인이 만료되었습니다. 다시 로그인해 주세요.' });
+    };
+    window.addEventListener('hrm:session-expired', onSessionExpired);
+    return () => window.removeEventListener('hrm:session-expired', onSessionExpired);
   }, []);
 
   async function withBusy(label, task) {
