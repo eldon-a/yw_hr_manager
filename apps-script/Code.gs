@@ -40,8 +40,6 @@ const SEARCH_CACHE_TTL = 120;
 const API_SESSION_TTL_SECONDS = 21600;
 const API_SESSION_SECRET_PROP = 'HRM_API_SESSION_SECRET_V1';
 const TZ_CHECKED_PROP = 'HRM_TZ_CHECKED_V2';
-// 흩어진 행을 개별로 읽는 구간이 이보다 많아지면 시트 전체를 한 번에 읽는 편이 빠르다.
-const SHEET_ROW_FETCH_MAX_GROUPS = 40;
 const PENDING_REQUESTS_CACHE_KEY = 'PENDING_REQUESTS_V3';
 const PENDING_REQUESTS_CACHE_SECONDS = 30;
 const APP_TIMEZONE = 'Asia/Seoul';
@@ -110,7 +108,7 @@ function handleApiAction_(action, payload) {
         result = searchMembers(payload.keyword);
         break;
       case 'checkAuthAndLoadData':
-        result = attachAdminBootstrap_(issueApiSession_(checkAuthAndLoadData(payload.email, payload.password)));
+        result = issueApiSession_(checkAuthAndLoadData(payload.email, payload.password));
         break;
       case 'verifyMemberLogin':
         result = verifyMemberLogin(payload.name, payload.memberId, payload.departmentName);
@@ -202,20 +200,6 @@ function apiJson_(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
-}
-
-/**
- * 로그인 직후 어차피 다시 불러오는 값 중 '싼 것'만 응답에 함께 실어 보낸다.
- * 회원 헤더는 헤더 행 하나만 읽으므로 비용이 거의 없다.
- *
- * 승인 대기 목록은 여기에 넣지 않는다. 요청 건수와 payload 크기에 따라 수 초가 걸릴 수 있는데,
- * 그러면 로그인 화면이 그동안 멈춰 있는 것처럼 보인다. 목록은 대시보드를 먼저 띄운 뒤
- * 화면 안에서 따로 불러온다.
- */
-function attachAdminBootstrap_(login) {
-  if (!login || login.role !== 'ADMIN') return login;
-  try { login.memberHeaders = getMemberHeaders(); } catch (e) { login.memberHeaders = null; }
-  return login;
 }
 
 /** 프런트에 전달할 오류 코드를 함께 담은 Error를 만든다. */
@@ -1709,39 +1693,6 @@ function cachePendingRequestsResult_(list) {
   return list;
 }
 
-/**
- * 지정한 행 번호의 값만 읽어 { 행번호: 값배열 } 로 돌려준다.
- * 연속된 행은 한 번에 묶어 읽고, 흩어진 구간이 너무 많아 오히려 손해일 때는
- * 전체를 한 번에 읽는 쪽으로 되돌아간다.
- */
-function readSheetRowsByNumber_(sheet, rowNumbers, lastRow, lastCol) {
-  const out = {};
-  if (!rowNumbers || !rowNumbers.length) return out;
-
-  const groups = [];
-  let start = rowNumbers[0];
-  let prev = rowNumbers[0];
-  for (let i = 1; i < rowNumbers.length; i++) {
-    if (rowNumbers[i] === prev + 1) { prev = rowNumbers[i]; continue; }
-    groups.push({ start: start, count: prev - start + 1 });
-    start = rowNumbers[i];
-    prev = rowNumbers[i];
-  }
-  groups.push({ start: start, count: prev - start + 1 });
-
-  if (groups.length > SHEET_ROW_FETCH_MAX_GROUPS) {
-    const all = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-    for (let i = 0; i < rowNumbers.length; i++) out[rowNumbers[i]] = all[rowNumbers[i] - 2];
-    return out;
-  }
-
-  for (let g = 0; g < groups.length; g++) {
-    const values = sheet.getRange(groups[g].start, 1, groups[g].count, lastCol).getValues();
-    for (let i = 0; i < values.length; i++) out[groups[g].start + i] = values[i];
-  }
-  return out;
-}
-
 function getPendingRequests() {
   const apiCache = CacheService.getScriptCache();
   const cached = apiCache.get(PENDING_REQUESTS_CACHE_KEY);
@@ -1783,26 +1734,20 @@ function getPendingRequests() {
   const needMemberInfo = Object.keys(pendingMemberIds).length > 0;
   if (needMemberInfo) {
     const memSheet = ss.getSheetByName(SHEETS.MEMBERS);
-    const memLastRow = memSheet ? memSheet.getLastRow() : 0;
-    const memLastCol = memSheet ? memSheet.getLastColumn() : 0;
-    if (memSheet && memLastRow >= 2 && memLastCol >= 1) {
-      memSheet.getRange(1, 1, 1, memLastCol).getValues()[0].forEach((header, idx) => {
+    if (memSheet) {
+      // Members 시트를 한 번에 읽는다.
+      // Apps Script는 읽은 셀 수보다 getRange 호출 횟수가 비용을 좌우한다.
+      // 필요한 행만 골라 여러 번 읽으면 전송량은 줄지만 왕복이 늘어 오히려 느려진다.
+      const mVals = memSheet.getDataRange().getValues();
+      const memberHeaders = mVals.length ? mVals[0] : [];
+      memberHeaders.forEach((header, idx) => {
         if (header) memberMap[String(header).trim()] = idx;
       });
-      const idIdx = memberMap[COLS.ID];
-      if (idIdx !== undefined) {
-        // 승인 대기 회원은 보통 몇 명뿐이다. 회원번호 열만 먼저 읽어 대상 행을 찾고
-        // 그 행만 가져오면 시트 전체를 읽을 때보다 훨씬 적은 셀만 전송된다.
-        const idValues = memSheet.getRange(2, idIdx + 1, memLastRow - 1, 1).getValues();
-        const wantedRows = [];
-        for (let i = 0; i < idValues.length; i++) {
-          if (pendingMemberIds[normalize(idValues[i][0], true)]) wantedRows.push(i + 2);
-        }
-        const rowsByNumber = readSheetRowsByNumber_(memSheet, wantedRows, memLastRow, memLastCol);
-        for (let i = 0; i < wantedRows.length; i++) {
-          const r = rowsByNumber[wantedRows[i]];
-          if (!r) continue;
-          const key = normalize(r[idIdx], true);
+      if (memberMap[COLS.ID] !== undefined) {
+        for (let i = 1; i < mVals.length; i++) {
+          const r = mVals[i];
+          const key = normalize(r[memberMap[COLS.ID]], true);
+          if (!pendingMemberIds[key]) continue;
           const dId = memberMap[COLS.DEPT_ID] !== undefined ? String(r[memberMap[COLS.DEPT_ID]] || '').trim() : '';
           const birthValue = memberMap[COLS.BIRTH] !== undefined ? r[memberMap[COLS.BIRTH]] : '';
           memInfo[key] = {

@@ -4,8 +4,30 @@ const inflight = new Map();
 const TOKEN_KEY = 'hrm.apiToken.v1';
 const PROFILE_KEY = 'hrm.staffProfile.v1';
 
-// Apps Script는 콜드 스타트에서 30초를 넘기는 경우가 있어 기본 대기 시간을 넉넉히 잡는다.
+// 무거운 작업(엑셀·PDF·업로드)이 실제로 오래 걸릴 때를 위한 기본값.
 const DEFAULT_TIMEOUT_MS = 45000;
+
+// Apps Script는 POST → 302 → 결과 전달의 2단계로 응답한다.
+// 스크립트 실행(1단계)은 2~3초로 일정한데, 결과를 전달하는 2단계가 가끔 30초 넘게 멈춘다.
+// 이때는 오래 기다리는 것보다 끊고 다시 보내는 편이 훨씬 빠르다(재시도는 보통 2~3초에 끝난다).
+// 서버 연산 자체는 1초 미만이므로 12초를 넘겼다면 정상 처리 중일 가능성은 낮다.
+const FAST_READ_TIMEOUT_MS = 12000;
+
+// 가볍고 데이터를 바꾸지 않는 조회. 짧게 끊고 재시도해도 안전하다.
+// 오래 걸릴 수 있는 조회(이력·회원카드)는 호출부에서 timeoutMs를 따로 지정한다.
+const FAST_READ_ACTIONS = new Set([
+  'ping',
+  'getDepartmentList',
+  'getMemberHeaders',
+  'searchMembers',
+  'checkAuthAndLoadData',
+  'verifyMemberLogin',
+  'findSelfMemberCandidates',
+  'getPendingRequests',
+  'searchMembersForPhoto',
+  'getPhotoQueueStatus',
+  'getMemberCardFilterOptions',
+]);
 
 // 데이터를 바꾸지 않는 작업만 자동 재시도한다. 쓰기 작업은 중복 처리를 막기 위해 한 번만 보낸다.
 const SAFE_ACTIONS = new Set([
@@ -99,12 +121,13 @@ export async function callApi(action, params = {}, options = {}) {
     throw new ApiError('API 주소가 설정되지 않았습니다. web/.env.local의 VITE_API_URL을 확인해 주세요.', 'missing_url');
   }
 
-  const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
+  const fastRead = !options.timeoutMs && FAST_READ_ACTIONS.has(action);
+  const timeoutMs = options.timeoutMs || (fastRead ? FAST_READ_TIMEOUT_MS : DEFAULT_TIMEOUT_MS);
   const maxAttempts = options.retries != null
     ? options.retries + 1
     : (SAFE_ACTIONS.has(action) ? 3 : 1);
   // 재시도까지 포함한 전체 대기 상한. 사용자가 무한정 기다리지 않도록 묶어 둔다.
-  const deadline = Date.now() + (options.totalBudgetMs || timeoutMs * 2);
+  const deadline = Date.now() + (options.totalBudgetMs || (fastRead ? 45000 : timeoutMs * 2));
 
   let lastError;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -161,7 +184,7 @@ export const api = {
   submitRequest: (form) => callApi('submitRequest', { form }, { timeoutMs: 90000 }),
   pendingRequests: () => callApi('getPendingRequests'),
   processRequest: (requestId, decision, adminEmail) => callApi('processAdminAction', { requestId, decision, adminEmail }, { timeoutMs: 60000 }),
-  audit: (mode, p1, p2, header) => callApi('getDetailedHistory', { mode, p1, p2, header }),
+  audit: (mode, p1, p2, header) => callApi('getDetailedHistory', { mode, p1, p2, header }, { timeoutMs: 60000 }),
   bulkUpdate: (fileId, adminEmail) => callApi('runExternalBulkUpdate', { fileId, adminEmail }, { timeoutMs: 120000 }),
   bulkRegister: (fileId, adminEmail) => callApi('runExternalBulkRegister', { fileId, adminEmail }, { timeoutMs: 120000 }),
   exportExcel: (headers) => callApi('exportToExcel', { headers }, { timeoutMs: 120000 }),
