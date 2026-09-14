@@ -396,27 +396,44 @@ function getMemberHeaders() {
 function calculateAge(birthDateValue) {
   if (!birthDateValue) return '';
   try {
-    let birthYear = 0;
+    let birthYear = 0, birthMonth = 0, birthDay = 0;
 
-    // 시트 날짜 셀은 Date 객체로 들어온다. 스크립트/시트 시간대 차이를 피하기 위해
-    // getFullYear() 대신 애플리케이션 시간대로 연도만 추출한다.
+    // 시트 날짜 셀은 Date 객체로 들어온다. 스크립트/시트 시간대 차이로 하루가 밀리는 것을 피하기 위해
+    // getFullYear() 대신 애플리케이션 시간대로 연/월/일을 추출한다.
     if (birthDateValue instanceof Date && !isNaN(birthDateValue.getTime())) {
-      birthYear = Number(Utilities.formatDate(birthDateValue, APP_TIMEZONE, 'yyyy'));
+      const ymd = Utilities.formatDate(birthDateValue, APP_TIMEZONE, 'yyyy-MM-dd').split('-');
+      birthYear = Number(ymd[0]); birthMonth = Number(ymd[1]); birthDay = Number(ymd[2]);
     } else {
       const raw = String(birthDateValue).trim();
-      // 가입 폼의 yyyy-MM-dd뿐 아니라 yyyy.MM.dd, yyyy/MM/dd, yyyymmdd도 동일하게 처리한다.
-      const yearMatch = /^(\d{4})(?:[-.\/년]|\d{4}$)/.exec(raw);
-      if (yearMatch) {
-        birthYear = Number(yearMatch[1]);
+      // 가입 폼의 yyyy-MM-dd뿐 아니라 yyyy.MM.dd, yyyy/MM/dd, yyyy년MM월dd일, yyyymmdd도 동일하게 처리한다.
+      const ymdMatch = /^(\d{4})\s*[-.\/년]\s*(\d{1,2})\s*[-.\/월]\s*(\d{1,2})/.exec(raw)
+                    || /^(\d{4})(\d{2})(\d{2})$/.exec(raw);
+      if (ymdMatch) {
+        birthYear = Number(ymdMatch[1]); birthMonth = Number(ymdMatch[2]); birthDay = Number(ymdMatch[3]);
       } else {
         const parsed = toDateInAppTimeZone(raw);
-        if (parsed) birthYear = Number(Utilities.formatDate(parsed, APP_TIMEZONE, 'yyyy'));
+        if (parsed) {
+          const ymd = Utilities.formatDate(parsed, APP_TIMEZONE, 'yyyy-MM-dd').split('-');
+          birthYear = Number(ymd[0]); birthMonth = Number(ymd[1]); birthDay = Number(ymd[2]);
+        } else {
+          // 연도만 저장된 경우에는 월/일 보정 없이 연도 차이만 사용한다.
+          const yearOnly = /^(\d{4})$/.exec(raw);
+          if (yearOnly) birthYear = Number(yearOnly[1]);
+        }
       }
     }
 
-    const currentYear = Number(Utilities.formatDate(new Date(), APP_TIMEZONE, 'yyyy'));
+    const today = Utilities.formatDate(new Date(), APP_TIMEZONE, 'yyyy-MM-dd').split('-');
+    const currentYear = Number(today[0]), currentMonth = Number(today[1]), currentDay = Number(today[2]);
     if (!birthYear || birthYear < 1800 || birthYear > currentYear) return '';
-    return currentYear - birthYear + 1;
+
+    // 만 나이: 올해 생일이 아직 지나지 않았으면 1살을 뺀다.
+    let age = currentYear - birthYear;
+    if (birthMonth && birthDay &&
+        (currentMonth < birthMonth || (currentMonth === birthMonth && currentDay < birthDay))) {
+      age -= 1;
+    }
+    return age < 0 ? '' : age;
   } catch(e) { return ''; }
 }
 
@@ -836,16 +853,81 @@ function updateAllAges() {
   const map = d.map;
   if (map[COLS.BIRTH] === undefined || map[COLS.AGE] === undefined) return "열 없음";
   const data = d.values; let count = 0;
+  // 나이 열만 다시 쓴다. 시트 전체를 setValues 하면 다른 열의 수식이 값으로 덮어쓰일 수 있다.
+  const ageCol = [];
   for (let i = 1; i < data.length; i++) {
     const birth = data[i][map[COLS.BIRTH]];
     const currentAge = data[i][map[COLS.AGE]];
+    let nextAge = currentAge;
     if (birth) {
       const newAge = calculateAge(birth);
-      if (newAge !== currentAge) { data[i][map[COLS.AGE]] = newAge; count++; }
+      if (newAge !== currentAge) { nextAge = newAge; count++; }
+    }
+    ageCol.push([nextAge]);
+  }
+  if (count > 0) {
+    d.sheet.getRange(2, map[COLS.AGE] + 1, ageCol.length, 1).setValues(ageCol);
+    bumpSearchCacheVersion_();
+    return count + "명 갱신";
+  }
+  return "갱신 대상 없음";
+}
+
+const AGE_UPDATE_TRIGGER_FN = 'updateAllAgesTrigger_';
+
+/** 트리거에서 호출되는 래퍼. 예외는 로그만 남기고 다음 실행을 방해하지 않는다. */
+function updateAllAgesTrigger_() {
+  try {
+    const result = updateAllAges();
+    console.log('[나이 자동 갱신] ' + result);
+  } catch (e) {
+    const msg = e && e.message ? e.message : String(e);
+    console.error('[나이 자동 갱신] 실패: ' + msg);
+  }
+}
+
+/**
+ * 나이 자동 갱신 트리거 설치 (매일 새벽 1시대). 최초 1회 수동 실행 필요.
+ * 편집기는 반환값을 보여주지 않으므로 실행 로그에도 결과를 남긴다.
+ */
+function setupAgeUpdateTrigger() {
+  removeAgeUpdateTrigger();
+  ScriptApp.newTrigger(AGE_UPDATE_TRIGGER_FN)
+    .timeBased()
+    .everyDays(1)
+    .atHour(1)
+    .create();
+  const msg = `나이 자동 갱신 트리거 설치 완료 (매일 01시대, handler=${AGE_UPDATE_TRIGGER_FN})`;
+  console.log(msg);
+  return msg;
+}
+
+/** 나이 자동 갱신 트리거 제거. */
+function removeAgeUpdateTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let removed = 0;
+  for (let i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === AGE_UPDATE_TRIGGER_FN) {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
     }
   }
-  if (count > 0) { d.sheet.getRange(1, 1, data.length, data[0].length).setValues(data); bumpSearchCacheVersion_(); return count + "명 갱신"; }
-  return "갱신 대상 없음";
+  const msg = `나이 자동 갱신 트리거 제거: ${removed}개`;
+  console.log(msg);
+  return msg;
+}
+
+/** 나이 자동 갱신 트리거가 실제로 걸렸는지 실행 로그로 확인한다. */
+function checkAgeUpdateTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  const mine = triggers.filter(t => t.getHandlerFunction() === AGE_UPDATE_TRIGGER_FN);
+  const msg = mine.length
+    ? `나이 자동 갱신 트리거 설치됨: ${mine.length}개 (handler=${AGE_UPDATE_TRIGGER_FN})`
+    : `나이 자동 갱신 트리거 없음. setupAgeUpdateTrigger() 를 실행하세요.`;
+  console.log(msg);
+  console.log('전체 프로젝트 트리거 ' + triggers.length + '개: '
+    + triggers.map(t => t.getHandlerFunction()).join(', '));
+  return msg;
 }
 
 function moveNonActiveMembersToWithdrawnArchive() {
