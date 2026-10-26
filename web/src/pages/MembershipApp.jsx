@@ -15,6 +15,10 @@ import {
 
 const EMPTY_USER = { role: 'GUEST', userName: '', email: '' };
 const REQUEST_LABELS = { TRANSFER: '부서 이동', UPDATE: '정보 수정', WITHDRAW: '탈퇴 신청' };
+// 정보수정 요청 중 회원상태를 '명예'로 바꾸는 건. 승인하면 서버가 Members 행을 Remembering Members 시트로 옮긴다.
+function isHonoraryChange(item) {
+  return item?.type === 'UPDATE' && (item.changes || []).some((c) => c.label === '회원상태' && c.after === '명예');
+}
 
 function errorText(error) {
   return error?.message || String(error || '알 수 없는 오류가 발생했습니다.');
@@ -757,7 +761,7 @@ function AdminDashboard({ user, headers, onHeaders, initialRequests, setBusy, se
         </section>
       </aside>
       {detail && <RequestDetail item={detail} onClose={() => setDetail(null)} />}
-      {confirm && <ConfirmDialog title={confirm.decision === 'APPROVE' ? '요청 승인' : '요청 반려'} message={`${confirm.item.name}님의 ${REQUEST_LABELS[confirm.item.type] || confirm.item.type} 요청을 ${confirm.decision === 'APPROVE' ? '승인' : '반려'}할까요?`} confirmLabel={confirm.decision === 'APPROVE' ? '승인' : '반려'} danger={confirm.decision !== 'APPROVE'} onConfirm={processRequest} onCancel={() => setConfirm(null)} />}
+      {confirm && <ConfirmDialog title={confirm.decision === 'APPROVE' ? '요청 승인' : '요청 반려'} message={`${confirm.item.name}님의 ${REQUEST_LABELS[confirm.item.type] || confirm.item.type} 요청을 ${confirm.decision === 'APPROVE' ? '승인' : '반려'}할까요?${confirm.decision === 'APPROVE' && isHonoraryChange(confirm.item) ? ' 승인하면 회원상태가 명예로 바뀌고 Members 시트에서 Remembering Members 시트로 이동합니다.' : ''}`} confirmLabel={confirm.decision === 'APPROVE' ? '승인' : '반려'} danger={confirm.decision !== 'APPROVE'} onConfirm={processRequest} onCancel={() => setConfirm(null)} />}
     </div>
   );
 }

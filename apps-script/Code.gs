@@ -6,6 +6,7 @@ const SHEETS = {
   SPECIAL_MEMBERS: 'special_members',
   REQUESTS: 'Requests',
   ARCHIVE: 'WithdrawnArchive',
+  REMEMBERING: 'Remembering Members',
   DEPTHEADS: 'DeptHeads',
   ADMINS: 'Admins',
   DEPARTMENTS: 'Departments',
@@ -813,10 +814,11 @@ function getMaxMemberId_(memSheet, map) {
   return getMemberIdStats_(memSheet, map).max;
 }
 
-// 탈퇴 회원이 Members 시트에서 제거되어도 회원번호가 재사용되지 않도록,
-// 탈퇴 아카이브 시트(이름 후보 전체)에 보관된 과거 회원번호의 최댓값을 함께 반영한다.
+// 탈퇴·명예 회원이 Members 시트에서 제거되어도 회원번호가 재사용되지 않도록,
+// 탈퇴 아카이브 시트(이름 후보 전체)와 명예회원 보관 시트(Remembering Members)에
+// 보관된 과거 회원번호의 최댓값을 함께 반영한다.
 function getArchivedMaxMemberId_() {
-  const sheets = getWithdrawArchiveSheets_();
+  const sheets = getWithdrawArchiveSheets_().concat(getRememberingMembersSheets_());
   let max = 0;
   for (let s = 0; s < sheets.length; s++) {
     const archiveSheet = sheets[s];
@@ -932,6 +934,19 @@ function getWithdrawArchiveSheets_() {
   return sheets;
 }
 
+// 명예회원 보관 시트. 존재하면 [sheet], 없으면 [] 를 돌려준다(회원번호 스캔·진단용).
+function getRememberingMembersSheets_() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.REMEMBERING);
+  return sheet ? [sheet] : [];
+}
+
+// 명예회원 보관 시트를 돌려주고, 없으면 'Remembering Members' 이름으로 새로 만든다.
+function getRememberingMembersSheet_() {
+  const sheets = getRememberingMembersSheets_();
+  if (sheets.length) return sheets[0];
+  return SpreadsheetApp.getActiveSpreadsheet().insertSheet(SHEETS.REMEMBERING);
+}
+
 function getWithdrawArchiveSheet_() {
   const sheets = getWithdrawArchiveSheets_();
   // 이미 기록이 쌓여 있는 시트를 우선 사용한다. 빈 시트가 새로 생겨도 보관 기록이 흩어지지 않는다.
@@ -977,8 +992,20 @@ function ensureWithdrawArchiveHeaders_(sheet, memberHeaders, historyHeaders) {
   return updated;
 }
 
+// 탈퇴 승인: WithdrawnArchive 시트에 회원 행 + 이력을 보관한다.
 function archiveWithdrawnMember_(memberId, memberRowVals, memberMap, nowStr) {
-  const archiveSheet = getWithdrawArchiveSheet_();
+  return archiveMemberToSheet_(getWithdrawArchiveSheet_(), memberId, memberRowVals, memberMap, nowStr);
+}
+
+// 명예 승인: 탈퇴 보관과 같은 형식(record_type/archived_at/member_id/member_name + M_*/H_*)으로
+// 'Remembering Members' 시트에 회원 행 + 이력을 보관한다.
+function archiveHonoraryMember_(memberId, memberRowVals, memberMap, nowStr) {
+  return archiveMemberToSheet_(getRememberingMembersSheet_(), memberId, memberRowVals, memberMap, nowStr);
+}
+
+// Members 행(memberRowVals)과 MemberHistory 이력을 지정한 보관 시트에 기록한다.
+// 기록한 행 수(회원 1 + 이력 n)를 반환하며, 0 이면 호출 쪽에서 실패로 본다.
+function archiveMemberToSheet_(archiveSheet, memberId, memberRowVals, memberMap, nowStr) {
   const memberHeaders = getMemberHeaders();
   const historySheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.HISTORY);
 
@@ -1208,6 +1235,49 @@ function moveNonActiveMembersToWithdrawnArchive() {
   return `이동 완료: ${movedRows.length}명`;
 }
 
+// 수동 실행용. Members 에 남아 있는 회원상태 '명예' 회원을 Remembering Members 시트로 옮긴다.
+// (명예 승인 경로와 같은 함수/스키마를 사용하므로 보관 형식이 갈라지지 않는다)
+function moveHonoraryMembersToRememberingSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const memSheet = ss.getSheetByName(SHEETS.MEMBERS);
+  if (!memSheet) throw new Error("Members 시트를 찾을 수 없습니다.");
+
+  const data = memSheet.getDataRange().getValues();
+  if (data.length < 2) return "이동 대상 없음";
+
+  const map = getColumnMap(memSheet);
+  const statusIdx = map[COLS.STATUS] !== undefined ? map[COLS.STATUS] : 14; // O열 기본
+  const idIdx = map[COLS.ID];
+  const nowStr = nowDateTimeStr();
+
+  const targets = [];
+  for (let i = 1; i < data.length; i++) {
+    if (normalize(data[i][statusIdx]) === '명예') targets.push({ row: data[i], sheetRow: i + 1 }); // 시트 기준(1-based)
+  }
+  if (targets.length === 0) return "이동 대상 없음";
+
+  const movedRows = [];
+  const failed = [];
+  targets.forEach(t => {
+    const mid = idIdx !== undefined ? normalize(t.row[idIdx], true) : '';
+    try {
+      if (!archiveHonoraryMember_(mid, t.row, map, nowStr)) throw new Error("보관 0건");
+      movedRows.push(t.sheetRow);
+    } catch (e) {
+      failed.push(`${mid || (t.sheetRow + '행')}: ${e && e.message ? e.message : e}`);
+    }
+  });
+
+  // 아래에서 위로 삭제해야 행 번호가 유지됨 (보관 성공한 행만 삭제)
+  for (let i = movedRows.length - 1; i >= 0; i--) {
+    memSheet.deleteRow(movedRows[i]);
+  }
+  bumpSearchCacheVersion_();
+
+  if (failed.length) return `이동 완료: ${movedRows.length}명 / 보관 실패 ${failed.length}건 - ${failed.join(' | ')}`;
+  return `이동 완료: ${movedRows.length}명`;
+}
+
 // 아카이브 점검용. 스크립트 편집기에서 직접 실행하면 어느 시트에 어떻게 쌓이는지 확인할 수 있다.
 function diagnoseWithdrawArchive() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1221,6 +1291,10 @@ function diagnoseWithdrawArchive() {
       + ` / 격자 ${s.getMaxRows()}행x${s.getMaxColumns()}열`);
   });
   lines.push('실제 기록 대상 시트: ' + getWithdrawArchiveSheet_().getName());
+  const rememberingSheets = getRememberingMembersSheets_();
+  lines.push(rememberingSheets.length
+    ? `명예회원 보관 시트 '${SHEETS.REMEMBERING}': 데이터 ${Math.max(0, rememberingSheets[0].getLastRow() - 1)}행 / 헤더 ${rememberingSheets[0].getLastColumn()}열`
+    : `명예회원 보관 시트 없음 (다음 명예 승인 시 '${SHEETS.REMEMBERING}' 자동 생성)`);
 
   const memberHeaders = getMemberHeaders();
   const hSheet = ss.getSheetByName(SHEETS.HISTORY);
@@ -2175,6 +2249,8 @@ function processAdminAction(reqId, action, adminEmail) {
       const rowRange = memSheet.getRange(rIdx, 1, 1, memSheet.getLastColumn());
       const rowVals = rowRange.getValues()[0];
       const setV = (h, v) => { if(map[h]!==undefined) rowVals[map[h]] = v; };
+      // 정보수정으로 회원상태가 '명예'로 승인되는 경우: 탈퇴와 같이 보관 후 Members 행을 제거한다.
+      let moveToRemembering = false;
 
       if(type==='TRANSFER') {
         const tDept = reqRow[6];
@@ -2248,6 +2324,8 @@ function processAdminAction(reqId, action, adminEmail) {
              const normStatus = normalize(p[k]);
              if (normStatus !== '활동' && normStatus !== '명목' && normStatus !== '명예' && normStatus !== '탈퇴' && normStatus !== '자격정지') return;
              nextVal = normStatus;
+             // 이미 '명예'인 회원이 Members 에 남아 있어도 승인 시 Remembering Members 로 옮긴다.
+             if (normStatus === '명예') moveToRemembering = true;
            }
 
            const oldVal = toDisplayValue_(rowVals[map[h]]);
@@ -2286,8 +2364,9 @@ function processAdminAction(reqId, action, adminEmail) {
           changedDetails.push(`입회원서: ${oldForm ? '기존 파일' : '(빈값)'} → 신규 파일`);
         }
 
+        if (moveToRemembering) changedDetails.push(`${SHEETS.REMEMBERING} 시트로 이동`);
         const noteStr = changedDetails.length ? changedDetails.join(' | ') : '변경 없음';
-        histSheet.appendRow([Utilities.getUuid(), mid, 'UPDATE', reqRow[5], reqRow[5], '활동', '활동', '정보수정', reqId, adminEmail, nowStr, noteStr]);
+        histSheet.appendRow([Utilities.getUuid(), mid, 'UPDATE', reqRow[5], reqRow[5], '활동', moveToRemembering ? '명예' : '활동', '정보수정', reqId, adminEmail, nowStr, noteStr]);
       }
       setV(COLS.UPDATED_AT, nowStr);
       // 컬럼이 동적으로 추가된 경우 rowRange 를 최신 컬럼 수로 재계산
@@ -2304,6 +2383,19 @@ function processAdminAction(reqId, action, adminEmail) {
         }
         if (!archivedCount) {
           throw new Error(`탈퇴 보관(${SHEETS.ARCHIVE})에 실패해 승인을 중단했습니다. (보관 0건)`);
+        }
+        memSheet.deleteRow(rIdx);
+      } else if (moveToRemembering) {
+        // 명예 승인: 회원상태를 '명예'로 바꾼 행(rowVals)을 Remembering Members 시트에 보관한 뒤 Members 행을 제거한다.
+        // 보관이 실패하면 Members 는 건드리지 않고 승인을 중단한다(요청은 대기 상태로 남는다).
+        let archivedCount = 0;
+        try {
+          archivedCount = archiveHonoraryMember_(mid, rowVals, map, nowStr);
+        } catch (archiveErr) {
+          throw new Error(`명예회원 보관(${SHEETS.REMEMBERING})에 실패해 승인을 중단했습니다: ${archiveErr && archiveErr.message ? archiveErr.message : archiveErr}`);
+        }
+        if (!archivedCount) {
+          throw new Error(`명예회원 보관(${SHEETS.REMEMBERING})에 실패해 승인을 중단했습니다. (보관 0건)`);
         }
         memSheet.deleteRow(rIdx);
       } else {
