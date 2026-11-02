@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { driveThumbnail, formatBytes, getImageSize, isAllowedImage, prepareMemberPhoto } from '../file-utils.js';
+import { formatMobilePhone } from '../phone-utils.js';
 import { BrandHeader, BusyOverlay, EmptyState, Field, Notice, PageTitle, StatusBadge } from '../ui.jsx';
 
 function errorText(error) { return error?.message || String(error || '오류가 발생했습니다.'); }
@@ -125,7 +126,7 @@ export default function PhotoUpload() {
           <div className="card-header"><h2>2. 수정 내용</h2><StatusBadge tone={selected.has_photo ? 'success' : 'warning'}>{selected.has_photo ? '기존 사진 있음' : '사진 없음'}</StatusBadge></div>
           <SelectedPhotoMember member={selected} />
           <div className="form-grid">
-            <Field label="전화번호"><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
+            <Field label="전화번호"><input type="tel" inputMode="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} onBlur={() => setForm((prev) => ({ ...prev, phone: formatMobilePhone(prev.phone) }))} /></Field>
             <Field label="이메일"><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
             <Field label="주소" className="full"><input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
             <Field label="직업"><input value={form.job} onChange={(e) => setForm({ ...form, job: e.target.value })} /></Field>

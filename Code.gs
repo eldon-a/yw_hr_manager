@@ -45,6 +45,9 @@ const APP_TIMEZONE = 'Asia/Seoul';
 const MEMBER_LAST_ID_PROP_KEY = 'MEMBER_LAST_ID_V2';
 const MEMBER_LAST_ID_LEGACY_KEYS = ['MEMBER_LAST_ID_V1', 'MEMBER_LAST_ID'];
 
+// 정보수정 요청에서 선택할 수 있는 회원상태 값. 프런트(MembershipApp.jsx)의 목록과 같아야 한다.
+const MEMBER_STATUS_OPTIONS = ['활동', '명목', '명예', '휴회원', '탈퇴', '자격정지'];
+
 const COLS = {
   ID: '회원번호', NAME: '성명', PHONE: '전화번호', EMAIL: 'E-mail',
   GENDER: '남/여', BIRTH: '생일', LUNAR: '양/음', AGE: '나이', 
@@ -98,6 +101,25 @@ function normalize(val, isId = false) {
   if (!val) return "";
   const str = String(val);
   return isId ? str.replace(/\s+/g, '') : str.trim();
+}
+
+// 전화번호가 휴대전화 패턴으로 보이면 010-0000-0000 형식으로 맞춘다.
+// 시트/엑셀에서 숫자로 저장돼 앞자리 0이 사라진 값(예: 1059572040)도 010-5957-2040 으로 복원한다.
+// 휴대전화 패턴이 아니면(일반전화, 복수 번호 등) 공백만 정리해 입력값을 그대로 돌려준다.
+function formatMobilePhone_(val) {
+  if (val === null || val === undefined) return '';
+  const raw = String(val).trim();
+  if (!raw) return '';
+  let digits = raw.replace(/\D/g, '');
+  if (!digits) return raw;
+  // 국가번호 표기(+82 10-...)는 0을 붙여 국내 번호로 바꾼다.
+  if (/^82(1[016789]\d{7,8})$/.test(digits)) digits = '0' + digits.slice(2);
+  // 앞자리 0이 빠진 경우(1059572040)는 0을 붙인다.
+  if (/^1[016789]\d{7,8}$/.test(digits)) digits = '0' + digits;
+  if (/^01[016789]\d{8}$/.test(digits)) return digits.slice(0, 3) + '-' + digits.slice(3, 7) + '-' + digits.slice(7);
+  // 010 은 항상 11자리이므로 10자리(3-3-4) 형식은 011·016·017·018·019 만 인정한다.
+  if (/^01[16789]\d{7}$/.test(digits)) return digits.slice(0, 3) + '-' + digits.slice(3, 6) + '-' + digits.slice(6);
+  return raw;
 }
 
 function hasColumn(map, colName) {
@@ -312,7 +334,9 @@ function buildUpdatePreviewChanges_(payload, currentRow, map, deptMap, deptIdByN
     const label = getUpdateFieldLabel_(header);
 
     let nextVal = toDisplayValue_(rawNewVal);
-    if (header === COLS.TYPE) {
+    if (header === COLS.PHONE) {
+      nextVal = formatMobilePhone_(nextVal);
+    } else if (header === COLS.TYPE) {
       const normType = normalize(rawNewVal);
       if (normType !== '승려' && normType !== '신도') return;
       nextVal = normType;
@@ -326,7 +350,7 @@ function buildUpdatePreviewChanges_(payload, currentRow, map, deptMap, deptIdByN
       nextVal = normLunar;
     } else if (header === COLS.STATUS) {
       const normStatus = normalize(rawNewVal);
-      if (normStatus !== '활동' && normStatus !== '명목' && normStatus !== '명예' && normStatus !== '탈퇴' && normStatus !== '자격정지') return;
+      if (MEMBER_STATUS_OPTIONS.indexOf(normStatus) < 0) return;
       nextVal = normStatus;
     }
 
@@ -1486,6 +1510,8 @@ function submitRequest(form) {
 
   const requestId = Utilities.getUuid();
   const nowStr = nowDateTimeStr();
+  // 전화번호는 접수 단계에서 휴대전화 형식(010-0000-0000)으로 맞춰 저장한다.
+  if (form.phone) form.phone = formatMobilePhone_(form.phone);
   if(form.consent_mandatory) form.consent_log = `필수:${form.consent_mandatory}, 선택:${form.consent_optional}, 일시:${nowStr}`;
 
   // col[0..12]: 기본 정보 / col[13..14]: 승인자 email·시각 (승인 시 채워짐) / col[15]: 입회원서 파일 ID
@@ -1720,7 +1746,7 @@ function processAdminAction(reqId, action, adminEmail) {
       else if (k === 'relation') headerName = COLS.RELATION;
       else if (k === 'birth_place') headerName = COLS.BIRTHPLACE;
       else if (k === 'dharma_name') headerName = COLS.DHARMA_NAME;
-      if (headerName && map[headerName] !== undefined) newRow[map[headerName]] = p[k];
+      if (headerName && map[headerName] !== undefined) newRow[map[headerName]] = headerName === COLS.PHONE ? formatMobilePhone_(p[k]) : p[k];
     });
 
     // BirthPlace 컬럼이 아직 없으면 자동 생성 후 값 저장
@@ -1837,7 +1863,9 @@ function processAdminAction(reqId, action, adminEmail) {
            }
 
            let nextVal = toDisplayValue_(p[k]);
-           if (h === COLS.TYPE) {
+           if (h === COLS.PHONE) {
+             nextVal = formatMobilePhone_(nextVal);
+           } else if (h === COLS.TYPE) {
              const normType = normalize(p[k]);
              if (normType !== '승려' && normType !== '신도') return;
              nextVal = normType;
@@ -1851,7 +1879,7 @@ function processAdminAction(reqId, action, adminEmail) {
              nextVal = normLunar;
            } else if (h === COLS.STATUS) {
              const normStatus = normalize(p[k]);
-             if (normStatus !== '활동' && normStatus !== '명목' && normStatus !== '명예' && normStatus !== '탈퇴' && normStatus !== '자격정지') return;
+             if (MEMBER_STATUS_OPTIONS.indexOf(normStatus) < 0) return;
              nextVal = normStatus;
              // 이미 '명예'인 회원이 Members 에 남아 있어도 승인 시 Remembering Members 로 옮긴다.
              if (normStatus === '명예') moveToRemembering = true;
@@ -2018,6 +2046,7 @@ function runExternalBulkUpdate(fileId, adminEmail) {
           else if(h !== COLS.ID && h !== COLS.NAME && map[h]!==undefined) {
             let v = val;
             if(v instanceof Date) v = formatInAppTimeZone(v, "yyyy-MM-dd");
+            if(h === COLS.PHONE) v = formatMobilePhone_(v);
             memData[targetRowIdx][map[h]] = v;
             isUpdated = true;
           }
@@ -2099,6 +2128,10 @@ function runExternalBulkRegister(fileId, adminEmail) {
     
     if(map[COLS.NAME]!==undefined && newRowData[map[COLS.NAME]]) {
        newRowData[map[COLS.NAME]] = normalize(newRowData[map[COLS.NAME]]);
+    }
+    // 엑셀에서 숫자로 들어와 앞자리 0이 빠진 전화번호(1059572040)도 010-5957-2040 으로 저장한다.
+    if(map[COLS.PHONE]!==undefined && newRowData[map[COLS.PHONE]] !== '') {
+       newRowData[map[COLS.PHONE]] = formatMobilePhone_(newRowData[map[COLS.PHONE]]);
     }
 
     newRows.push(newRowData);
@@ -2320,7 +2353,7 @@ function uploadMemberPhotoDirect(memberId, base64Data, fileName, uploader, membe
   const safeExtras = (extras && typeof extras === 'object') ? extras : {};
   const e = {
     birth_place: normalize(safeExtras.birth_place),
-    phone: normalize(safeExtras.phone),
+    phone: formatMobilePhone_(safeExtras.phone),
     email: normalize(safeExtras.email),
     address: normalize(safeExtras.address),
     job: normalize(safeExtras.job),
@@ -2522,7 +2555,7 @@ function processPhotoQueue_(lockTimeoutMs) {
       const fileLink = String(qRow[fileLinkQCol] || '');
       const uploader = String(qRow[uploaderQCol] || 'PHOTO_UPLOAD_TOOL');
       const birthPlace = birthPlaceQCol !== undefined ? String(qRow[birthPlaceQCol] || '').trim() : '';
-      const phoneVal = phoneQCol !== undefined ? String(qRow[phoneQCol] || '').trim() : '';
+      const phoneVal = phoneQCol !== undefined ? formatMobilePhone_(qRow[phoneQCol]) : '';
       const emailVal = emailQCol !== undefined ? String(qRow[emailQCol] || '').trim() : '';
       const addressVal = addressQCol !== undefined ? String(qRow[addressQCol] || '').trim() : '';
       const jobVal = jobQCol !== undefined ? String(qRow[jobQCol] || '').trim() : '';

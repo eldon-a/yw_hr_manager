@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, clearStaffSession, readStaffSession } from '../api.js';
 import { driveThumbnail, fileToDataUrl, isAllowedImage, prepareMemberPhoto } from '../file-utils.js';
+import { formatMobilePhone, formatPhoneInput } from '../phone-utils.js';
 import {
   BrandHeader,
   BusyOverlay,
@@ -15,6 +16,8 @@ import {
 
 const EMPTY_USER = { role: 'GUEST', userName: '', email: '' };
 const REQUEST_LABELS = { TRANSFER: '부서 이동', UPDATE: '정보 수정', WITHDRAW: '탈퇴 신청' };
+// 정보수정에서 선택할 수 있는 회원상태. 서버(Code.gs)의 MEMBER_STATUS_OPTIONS 와 같아야 한다.
+const MEMBER_STATUS_OPTIONS = ['활동', '명목', '명예', '휴회원', '탈퇴', '자격정지'];
 // 정보수정 요청 중 회원상태를 '명예'로 바꾸는 건. 승인하면 서버가 Members 행을 Remembering Members 시트로 옮긴다.
 function isHonoraryChange(item) {
   return item?.type === 'UPDATE' && (item.changes || []).some((c) => c.label === '회원상태' && c.after === '명예');
@@ -414,7 +417,7 @@ function NewMemberForm({ departments, user, consentOptional, onBack, onSubmit })
     const payload = {
       type: 'NEW',
       target_name: fd.get('name').trim(),
-      phone: fd.get('phone').trim(),
+      phone: formatMobilePhone(fd.get('phone')),
       birth: fd.get('birth'),
       lunar_solar: fd.get('lunar'),
       gender: fd.get('gender'),
@@ -461,7 +464,7 @@ function NewMemberForm({ departments, user, consentOptional, onBack, onSubmit })
       <form className="card" onSubmit={submit}>
         <div className="form-grid three">
           <Field label="성명" required><input name="name" autoComplete="name" required /></Field>
-          <Field label="전화번호" required><input name="phone" type="tel" autoComplete="tel" required /></Field>
+          <Field label="전화번호" required hint="숫자만 입력해도 010-0000-0000 형식으로 맞춰집니다."><input name="phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="010-0000-0000" onBlur={formatPhoneInput} required /></Field>
           <Field label="생년월일" required><input name="birth" type="date" required /></Field>
           <Field label="음력 / 양력"><select name="lunar" defaultValue="양"><option>양</option><option>음</option><option>윤</option></select></Field>
           <Field label="성별"><select name="gender" defaultValue="남"><option>남</option><option>여</option></select></Field>
@@ -559,7 +562,7 @@ function MemberRequestForm({ member, type, user, departments, headers, onBack, o
     if (key === 'type') return ['승려', '신도'];
     if (key === 'gender') return ['남', '여'];
     if (key === 'lunar_solar') return ['양', '음'];
-    if (key === 'status') return ['활동', '명목', '명예', '탈퇴', '자격정지'];
+    if (key === 'status') return MEMBER_STATUS_OPTIONS;
     return [];
   }
   async function submit(e) {
@@ -577,7 +580,7 @@ function MemberRequestForm({ member, type, user, departments, headers, onBack, o
         payload.reason = fd.get('reason').trim();
       } else {
         Object.assign(payload, {
-          phone: fd.get('phone').trim(), email: fd.get('email').trim(), address: fd.get('address').trim(),
+          phone: formatMobilePhone(fd.get('phone')), email: fd.get('email').trim(), address: fd.get('address').trim(),
           job: fd.get('job').trim(), company: fd.get('company').trim(), birth_place: fd.get('birthPlace').trim(),
           dharma_name: fd.get('dharmaName').trim(), reason: '정보수정',
         });
@@ -615,7 +618,7 @@ function MemberRequestForm({ member, type, user, departments, headers, onBack, o
         {type === 'UPDATE' && (
           <>
             <div className="form-grid">
-              <Field label="전화번호"><input name="phone" defaultValue={member.phone || ''} /></Field>
+              <Field label="전화번호"><input name="phone" type="tel" inputMode="tel" defaultValue={member.phone || ''} onBlur={formatPhoneInput} /></Field>
               <Field label="이메일"><input name="email" type="email" defaultValue={member.email || ''} /></Field>
               <Field label="주소" className="full"><input name="address" defaultValue={member.address || ''} /></Field>
               <Field label="직업"><input name="job" defaultValue={member.job || ''} /></Field>
